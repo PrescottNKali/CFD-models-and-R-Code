@@ -1,0 +1,1585 @@
+---
+title: "H2ForagingSuccess"
+author: "Kali Prescott"
+date: "2023-05-28"
+output: word_document
+---
+```{r packages}
+library(plyr)
+library(dplyr)
+library(car)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(xtable)
+library(lubridate)
+library(data.table)
+library(corrplot)
+library(ggpp)
+library(ggpmisc)
+library(lme4)
+library(oddsratio)
+library(emmeans)
+library(broom.mixed)
+library(performance) # for Nakagawa conditional/marginal R2
+library(partR2) # for part R2 values
+library(plotrix)
+library(afex) 
+library(multilevelTools)
+library(stats)
+library(nlme)
+library(sjPlot)
+library(sjmisc)
+library(regressinator)
+library(broom)
+library(effects)
+library(gridExtra)
+```
+
+
+```{r load data}
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\TaggingEffectsData\\outfiles")
+data.tag.fs <- read.csv("data.tag.fs.csv")
+
+data.tag.fs$TotalHeadFSA <- data.tag.fs$TotalHeadFSA*0.01
+data.tag.fs$TotalBackFSA <- data.tag.fs$TotalBackFSA*0.01
+data.tag.fs$FSATotal <- data.tag.fs$FSATotal*0.01
+
+
+PB<-data.tag.fs %>% filter(Season == "PB")
+PM<-data.tag.fs %>% filter(Season == "PM")
+PM$p0 <- ifelse(PM$PupMass == "0", 'No', 'Yes')
+
+mean(PM$FSATotal)
+mean(PM$TotalHeadFSA)
+mean(PB$FSATotal)
+max(PB$TotalHeadFSA)
+min(PB$TotalHeadFSA)
+plot(PB$FSATotal,PB$DepartMass)
+mean(PB$TripLength)
+sd(PB$TripLength)
+```
+
+#H2b. Foraging Success
+
+###Two General Linear Models (post-molt and post-birth)
+###rM+DAS = β0+βdPROX+βYr+βMDEP+βAg + βDoT
+###X = dPROX
+###Z = MDEP, Ag, and Yr
+###Post-molt dives include additional variable p0 (pup present)
+###rM+DAS = β0+βdPROX+βYr+βMDEP+βAg+βp0
+###Post-molt dives
+###X = dPROX
+###Z = MDEP, Ag, p0, and Yr
+
+#https://stackoverflow.com/questions/70933168/how-to-calculate-change-with-glm-gaussian-output
+#Need to try this because response is a rate https://stats.stackexchange.com/questions/495078/error-with-numeric-class-in-glm-with-gaussian-distribution
+#https://stats.stackexchange.com/questions/232666/should-i-use-an-offset-for-my-gaussian-glm
+#Instead of MassGainRate I would do CalcMassGain as the response and the either include TripLength as a covariate (more flexible and it's already a covariate OR as an offset which makes the response actually a rate)
+
+```{r H2b Foraging Success}
+H2b.PM = PM %>% dplyr::select(c("TOPPID", "Year", "Age", "DepartMass", "TripLength", "TotalHeadFSA", "TotalBackFSA","SkipBreed",
+                         "FSATotal","MassGainRate", "HeadCount", "BackCount",
+                         "CalcMassGain", "SatTagType", "ArrivalMass"))
+H2b.PM=subset(H2b.PM, SkipBreed == 1)
+H2b.PB = PB %>% dplyr::select(c("TOPPID", "SealID", "Year", "Age", "DepartMass", "TripLength", "TotalHeadFSA", "TotalBackFSA", "HeadCount", "BackCount",
+                         "FSATotal","MassGainRate",
+                         "CalcMassGain", "SatTagType"))
+H2b.PM$Year = as.factor(H2b.PM$Year)
+H2b.PB$Year = as.factor(H2b.PB$Year)
+H2b.PM$TOPPID = as.factor(H2b.PM$TOPPID)
+H2b.PB$TOPPID = as.factor(H2b.PB$TOPPID)
+mean(H2b.PM$TripLength)
+sd(H2b.PM$TripLength)
+mean(H2b.PM$DepartMass)
+sd(H2b.PM$DepartMass)
+
+plot(H2b.PM$TotalHeadFSA,H2b.PM$HeadCount)
+plot(H2b.PB$TotalHeadFSA,H2b.PB$HeadCount)
+
+print("Mean and Std Dev TripLength - PM")
+mean(H2b.PM$TripLength)
+sd(H2b.PM$TripLength)
+
+H2b.PB<-H2b.PB[!(H2b.PB$TOPPID=="2020011"),]
+print("Mean and Std Dev TripLength - PB")
+mean(H2b.PB$TripLength)
+sd(H2b.PB$TripLength)
+#std.error(H2b.PB$TripLength)
+hist(H2b.PB$TripLength)
+print("Mean and Std Dev Rate of Mass Gain")
+mean(H2b.PB$MassGainRate)
+sd(H2b.PB$MassGainRate)
+#std.error(H2b.PB$MassGainRate)
+mean(H2b.PB$DepartMass)
+sd(H2b.PB$DepartMass)
+print("PM:Mean and Std Dev Mass Gain")
+mean(H2b.PM$CalcMassGain)
+sd(H2b.PM$CalcMassGain)
+#std.error(H2b.PM$CalcMassGain)
+hist(H2b.PM$CalcMassGain)
+
+print("PB:Mean and Std Dev Mass Gain")
+mean(H2b.PB$CalcMassGain)
+sd(H2b.PB$CalcMassGain)
+#std.error(H2b.PB$CalcMassGain)
+hist(H2b.PB$CalcMassGain)
+
+mean(H2b.PM$FSATotal)
+sd(H2b.PM$FSATotal)
+
+mean(H2b.PB$FSATotal)
+sd(H2b.PB$FSATotal)
+
+print("PM:Mean and Std Dev Mass")
+mean(H2b.PM$DepartMass)
+sd(H2b.PM$DepartMass)
+var(H2b.PM$DepartMass)
+#std.error(H2b.PM$CalcMassGain)
+hist(H2b.PM$DepartMass)
+
+print("PM:Mean and Age")
+mean(H2b.PM$Age)
+sd(H2b.PM$Age)
+var(H2b.PM$Age)
+#std.error(H2b.PM$CalcMassGain)
+hist(H2b.PM$Age)
+
+print("PB:Mean and Std Dev Mass")
+mean(H2b.PB$DepartMass)
+sd(H2b.PB$DepartMass)
+var(H2b.PB$DepartMass)
+#std.error(H2b.PB$DepartMass)
+hist(H2b.PB$DepartMass)
+
+print("PB:Mean and Age")
+mean(H2b.PB$Age)
+sd(H2b.PB$Age)
+var(H2b.PB$Age)
+#std.error(H2b.PB$DepartMass)
+hist(H2b.PB$Age)
+
+
+print("PM:Mean and Std Trip Length")
+mean(H2b.PM$TripLength)
+sd(H2b.PM$TripLength)
+var(H2b.PM$TripLength)
+#std.error(H2b.PM$CalcMassGain)
+hist(H2b.PM$TripLength)
+
+print("PB:Mean and Std Trip Length")
+mean(H2b.PB$TripLength)
+sd(H2b.PB$TripLength)
+var(H2b.PB$TripLength)
+#std.error(H2b.PB$TripLength)
+hist(H2b.PB$TripLength)
+```
+
+
+```{r H2b Foraging Success Data Visualization}
+H2b.PM.FSA <- ggplot(data = H2b.PM, aes(x=FSATotal, y=MassGainRate)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain Rate (Kg/day)") +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.FSA
+```
+
+
+```{r H2b Foraging Success Data Visualization}
+H2b.PM.HFSA <- ggplot(data = H2b.PM, aes(x=TotalHeadFSA, y=CalcMassGain)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)") +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+ theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) 
+H2b.PM.HFSA
+
+InW=3; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(H2b.PM.HFSA, 
+          ncol = 1, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.MG.pub.png", sep=''),  #save the plot and name it as you please
+       width=3*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+```
+
+
+```{r H2b Foraging Success Data Visualization}
+H2b.PM.BFSA <- ggplot(data = H2b.PM, aes(x=TotalBackFSA, y=MassGainRate)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain Rate (Kg/day)", 
+                     #breaks = as.numeric(c(250,275,300,325,350,375,400))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("c. PM: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.BFSA
+
+H2b.PB.FSA <- ggplot(data = H2b.PB, aes(x=FSATotal, y=MassGainRate)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain Rate (Kg/day)", 
+                     #breaks = as.numeric(c(0,25,50,75,100,125,150))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") + 
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PB: All Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.FSA
+
+
+
+H2b.PB.HFSA.TL <- ggplot(data = H2b.PB, aes(x=TotalHeadFSA, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,25,50,75,100,125,150))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PB: Head-Mounted Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.HFSA.TL
+
+
+H2b.PB.BFSA <- ggplot(data = H2b.PB, aes(x=TotalBackFSA, y=MassGainRate)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain Rate (Kg/day)", 
+                     #breaks = as.numeric(c(0,25,50,75,100,125,150))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("c. PB: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.BFSA
+
+InW=7; InH=2.75 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+#grid.arrange(#H2b.PM.FSA,
+          #H2b.PB.FSA,
+#  H2b.PB.HFSA.TL,        
+ # H2b.PM.HFSA,
+   #       H2b.PB.HFSA,
+          
+          #H2b.PM.BFSA,
+          #H2b.PB.BFSA, 
+   #       ncol = 3, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.MG.TL.pub.png", sep=''),  #save the plot and name it as you please
+       width=7*2.54, height=2.75*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+H2b.PM.FSA <- ggplot(data = H2b.PM, aes(x=FSATotal, y=CalcMassGain)) + 
+  geom_point(size = 2) +
+  geom_smooth(method=lm, color="black", size = 2) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     breaks = as.numeric(c(250,275,300,325,350,375,400))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area ' (cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 22)) +
+  theme(axis.text.y = element_text(color = "black", size = 20)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 20)) +
+  theme(axis.title.x = element_text(color = "black", size = 22)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Devices")+
+  theme(plot.title = element_text(size = 24, color = "black"))
+H2b.PM.FSA
+
+H2b.PM.HFSA <- ggplot(data = H2b.PM, aes(x=TotalHeadFSA, y=CalcMassGain)) + 
+  geom_point(size = 2) +
+  geom_smooth(method=lm, color="black", size = 2) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     breaks = as.numeric(c(250,275,300,325,350,375,400))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area ' (cm^2))) +
+ theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank())   
+  #ggtitle("c. PM: Head-Mounted Devices")+
+  #theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.HFSA
+
+H2b.PM.BFSA <- ggplot(data = H2b.PM, aes(x=TotalBackFSA, y=CalcMassGain)) + 
+  geom_point(size = 2) +
+  geom_smooth(method=lm, color="black", size = 2) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     breaks = as.numeric(c(250,275,300,325,350,375,400))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 22)) +
+  theme(axis.text.y = element_text(color = "black", size = 20)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 20)) +
+  theme(axis.title.x = element_text(color = "black", size = 22)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("e. PM: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 24, color = "black"))
+H2b.PM.BFSA
+
+H2b.PB.FSA <- ggplot(data = H2b.PB, aes(x=FSATotal, y=CalcMassGain)) + 
+  geom_point(size = 2) +
+  geom_smooth(method=lm, color="black", size = 2) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     breaks = as.numeric(c(0, 25, 50, 75, 100, 125, 150, 175, 200))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 22)) +
+  theme(axis.text.y = element_text(color = "black", size = 20)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 20)) +
+  theme(axis.title.x = element_text(color = "black", size = 22)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: All Devices")+
+  theme(plot.title = element_text(size = 24, color = "black"))
+H2b.PB.FSA
+
+H2b.PB.HFSA <- ggplot(data = H2b.PB, aes(x=TotalHeadFSA, y=CalcMassGain)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     breaks = as.numeric(c(0, 25, 50, 75, 100, 125, 150, 175, 200))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("d. PB: Head-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.HFSA
+
+H2b.PB.BFSA <- ggplot(data = H2b.PB, aes(x=TotalBackFSA, y=CalcMassGain)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     breaks = as.numeric(c(0, 25, 50, 75, 100, 125, 150, 175, 200))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("f. PB: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.BFSA
+
+InW=3; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(H2b.PM.HFSA,
+          #H2b.PB.HFSA,
+          #H2b.PM.HFSA,
+          #H2b.PB.HFSA,
+          #H2b.PM.BFSA,
+          #H2b.PB.BFSA, 
+          ncol = 1, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.MG.pub.png", sep=''),  #save the plot and name it as you please
+       width=3*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+```
+
+#### Trip Length Graphs
+
+```{r foraging success triplength data viz}
+
+H2b.PM.FSA <- ggplot(data = H2b.PM, aes(x=FSATotal, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.FSA
+
+H2b.PM.HFSA <- ggplot(data = H2b.PM, aes(x=TotalHeadFSA, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area, Head (cm2)") +
+ theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PM: Head-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.HFSA
+
+H2b.PM.BFSA <- ggplot(data = H2b.PM, aes(x=TotalBackFSA, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("c. PM: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.BFSA
+
+H2b.PB.FSA <- ggplot(data = H2b.PB, aes(x=FSATotal, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("PB: All Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.FSA
+
+H2b.PB.HFSA <- ggplot(data = H2b.PB, aes(x=TotalHeadFSA, y=TripLength)) + 
+  geom_point(size = 2) +
+  geom_smooth(method=lm, color="black", size = 2) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 22)) +
+  theme(axis.text.y = element_text(color = "black", size = 20)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 20)) +
+  theme(axis.title.x = element_text(color = "black", size = 22)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("PB: Head Devices")+
+  theme(plot.title = element_text(size = 24, color = "black"))
+H2b.PB.HFSA
+
+H2b.PB.BFSA <- ggplot(data = H2b.PB, aes(x=TotalBackFSA, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("PB: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.BFSA
+
+
+InW=6; InH=2 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(H2b.PM.FSA,#H2b.PB.FSA,
+          H2b.PM.HFSA,#H2b.PB.HFSA,
+          H2b.PM.BFSA,#H2b.PB.BFSA, 
+          ncol = 3, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.TL.PM.pub.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=2*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+InW=4.65; InH=4.65 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(#H2b.PM.FSA,
+          #H2b.PB.FSA,
+          #H2b.PM.HFSA,
+          H2b.PB.HFSA,
+          #H2b.PM.BFSA,
+          #H2b.PB.BFSA, 
+          ncol = 1, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.TL.poster.png", sep=''),  #save the plot and name it as you please
+       width=4.65*2.54, height=4.65*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```
+
+```{r other data viz}
+
+H2b.PM.DM.TL <- ggplot(data = H2b.PM, aes(x=TripLength, y=DepartMass)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Departure Mass (Kg)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Trip Length (Days)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: Departure Mass and Trip Duration")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.DM.TL
+
+H2b.PB.DM.TL <- ggplot(data = H2b.PB, aes(x=DepartMass, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (Days)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Departure Mass (Kg)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: Departure Mass and Trip Duration")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.DM.TL
+
+
+InW=6; InH=2 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(H2b.PM.DM.TL,
+          H2b.PB.DM.TL, 
+          ncol = 2, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.DM.TL.pub.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=2*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+
+H2b.PM.MG.TL <- ggplot(data = H2b.PM, aes(x=TripLength, y=CalcMassGain)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Trip Length (Days)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: Mass Gain and Trip Duration")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.MG.TL
+
+H2b.PB.MG.TL <- ggplot(data = H2b.PB, aes(x=TripLength, y=CalcMassGain)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Mass Gain (Kg)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Trip Length (Days)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: Mass Gain and Trip Duration")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.MG.TL
+
+
+InW=6; InH=2 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(H2b.PM.MG.TL,
+          H2b.PB.MG.TL, 
+          ncol = 2, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.MG.TL.pub.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=2*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+
+H2b.PM.sattag <- ggplot(data = H2b.PM, aes(y=MassGainRate, x=reorder(SatTagType, MassGainRate))) + 
+  geom_boxplot() +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_x_discrete(name = "SRDL Type", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_y_continuous(name="Mass Gain Rate (Kg/day)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: Mass Gain Rate by SRDL Type")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.sattag
+
+
+H2b.PB.sattag <- ggplot(data = H2b.PB, aes(y=MassGainRate, x=reorder(SatTagType, MassGainRate))) + 
+  geom_boxplot() +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_x_discrete(name = "SRDL Type", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_y_continuous(name="Mass Gain Rate (Kg/day)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: Mass Gain Rate by SRDL Type")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.sattag
+
+InW=6; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+grid.arrange(H2b.PM.sattag,
+          H2b.PB.sattag, 
+          ncol = 2, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2b.FS.sattag.pub.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+H2b.PM.year <- ggplot(data = H2b.PM, aes(y=MassGainRate, x=reorder(as.factor(Year), MassGainRate))) + 
+  geom_boxplot() +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_x_discrete(name = "SRDL Type", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_y_continuous(name="Mass Gain Rate (Kg/day)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: Mass Gain by SRDL Type")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PM.year
+
+
+H2b.PB.year <- ggplot(data = H2b.PB, aes(y=MassGainRate, x=reorder(as.factor(Year), MassGainRate))) + 
+  geom_boxplot() +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_x_discrete(name = "Year", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_y_continuous(name="Mass Gain Rate (Kg/day)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: Mass Gain Rate by Year")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2b.PB.year
+```
+
+#### RH: Take out skipbreeders (do only on animals that had a pup) (keep in for repro success model another model on whether animals skipped relative to tags)
+```{r H2b PM Vif}
+H2b.PM$CalcMassGain = as.integer(H2b.PM$CalcMassGain)
+form <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Year) #AIC: 
+H2b.PM.m <- lmer(form, data=H2b.PM)
+summary(H2b.PM.m)
+anova(H2b.PM.m)
+vif(H2b.PM.m)
+#getting lots of errors so scaled varaibles and that fixed everything
+
+```
+
+#### https://rstudio-pubs-static.s3.amazonaws.com/33653_57fc7b8e5d484c909b615d8633c01d51.html
+
+### Start with PM model first. The VIF values are good
+
+```{r H2b PM model selection}
+H2b.PM$CalcMassGain = as.integer(H2b.PM$CalcMassGain)
+form1 <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+H2b.PM.m1 <- lmer(form1, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m1)
+vif(H2b.PM.m1)
+form1a <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year) 
+H2b.PM.m1a <- lmer(form1a, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m1a)
+form1b <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) 
+H2b.PM.m1b <- lmer(form1b, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m1b)
+
+anova(H2b.PM.m1,H2b.PM.m1a,H2b.PM.m1b)
+
+form2 <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:Age
+H2b.PM.m2 <- lmer(form2, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m2)
+form2a <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+H2b.PM.m2a <- lmer(form2a, REML=FALSE, data=H2b.PM)
+summary(H2b.PM.m2a)
+form2b <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA
+H2b.PM.m2b <- lmer(form2b, REML=FALSE, data=H2b.PM)
+summary(H2b.PM.m2b)
+
+anova(H2b.PM.m2,H2b.PM.m2a,H2b.PM.m2b)
+
+form2a <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+H2b.PM.m2a <- lmer(form2a, REML=FALSE, data=H2b.PM)
+form3a <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA
+H2b.PM.m3a <- lmer(form3a, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m3a)
+form3b <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+H2b.PM.m3b <- lmer(form3b, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m3b)
+
+anova(H2b.PM.m2a,H2b.PM.m3a,H2b.PM.m3b)
+
+form4a <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+H2b.PM.m4a <- lmer(form4a, REML=FALSE, data=H2b.PM)
+summary(H2b.PM.m4a)
+form4b <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year)
+H2b.PM.m4b <- lmer(form4b, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m4b)
+form4c <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year)
+H2b.PM.m4c <- lmer(form4c, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m4c)
+form4d <-  CalcMassGain ~ TotalHeadFSA + Age + DepartMass + (1|Year)
+H2b.PM.m4d <- lmer(form4d, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m4d)
+form4e <-  CalcMassGain ~ TotalBackFSA + Age + DepartMass + (1|Year)
+H2b.PM.m4e <- lmer(form4e, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m4e)
+
+anova(H2b.PM.m4a,H2b.PM.m4b,H2b.PM.m4c,H2b.PM.m4d,H2b.PM.m4e)
+
+form5 <-  CalcMassGain ~ TotalHeadFSA + Age + DepartMass + (1|Year)
+H2b.PM.m5 <- lmer(form5, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m5)
+
+form5a <-  CalcMassGain ~ TotalHeadFSA + DepartMass + (1|Year)
+H2b.PM.m5a <- lmer(form5a, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m5a)
+form5b <-  CalcMassGain ~ TotalHeadFSA + Age + (1|Year)
+H2b.PM.m5b <- lmer(form5b, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m5b)
+form5c <-  CalcMassGain ~ Age + DepartMass + (1|Year)
+H2b.PM.m5c <- lmer(form5c, REML=FALSE, data=H2b.PM)
+#summary(H2b.PM.m5c)
+
+anova(H2b.PM.m5,H2b.PM.m5a,H2b.PM.m5b,H2b.PM.m5c)
+
+H2b.PM.m5 <- lmer(form5, data=H2b.PM)
+summary(H2b.PM.m5)
+r2_nakagawa(H2b.PM.m5)
+#mixed model effect size
+#d = estimate for fixed effect / (sqrt of sum of variances of random effects)
+lmerTest::step(H2b.PM.m2, ddf = c("Satterthwaite"), alpha.fixed = 0.05,
+  reduce.fixed = TRUE, reduce.random = FALSE)
+
+PMMGPartR2<-partR2(H2b.PM.m5, partvars = c("TotalHeadFSA", "Age", "DepartMass"), 
+                  R2_type = "marginal", nboot = 20)
+PMMGPartR2
+
+d.head = 0.7461/sqrt(55)
+d.head
+d.DM = 0.3423/sqrt(55)
+d.DM
+d.A = 2.4328/sqrt(55)
+d.A
+
+new.dat = H2b.PM
+new.dat.0 = H2b.PM
+sd(H2b.PM$TotalHeadFSA)/mean(H2b.PM$TotalHeadFSA)
+max(H2b.PM$TotalHeadFSA)
+min(H2b.PM$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2b.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2b.PM$TotalHeadFSA)
+new.dat.0$TotalHeadFSA = min(H2b.PM$TotalHeadFSA)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null.H<-predict(H2b.PM.m5,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred.H<-predict(H2b.PM.m5, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred.null.H)
+mean(pred.H)
+mean(pred.H)-mean(pred.null.H)
+
+# mean(pred.null.H)
+# 310.7347
+# mean(pred.H)
+# 287.0805
+# mean(pred.H)-mean(pred.null.H)
+# -23.65424
+
+new.dat = H2b.PM
+new.dat.0 = H2b.PM
+sd(H2b.PM$DepartMass)/mean(H2b.PM$DepartMass)
+max(H2b.PM$DepartMass)
+min(H2b.PM$DepartMass)
+#new.dat$TotalHeadFSA = H2b.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$DepartMass = max(H2b.PM$DepartMass)
+new.dat.0$DepartMass = min(H2b.PM$DepartMass)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null.DM<-predict(H2b.PM.m5,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred.DM<-predict(H2b.PM.m5, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred.null.DM)
+mean(pred.DM)
+mean(pred.DM)-mean(pred.null.DM)
+# mean(pred.null.DM)
+# 275.8138
+# mean(pred.DM)
+# 329.138
+# mean(pred.DM)-mean(pred.null.DM)
+# 53.32424
+
+
+new.dat = H2b.PM
+new.dat.0 = H2b.PM
+sd(H2b.PM$Age)/mean(H2b.PM$Age)
+max(H2b.PM$Age)
+min(H2b.PM$Age)
+#new.dat$TotalHeadFSA = H2b.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$Age = max(H2b.PM$Age)
+new.dat.0$Age = min(H2b.PM$Age)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null.A<-predict(H2b.PM.m5,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred.A<-predict(H2b.PM.m5, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred.null.A)
+mean(pred.A)
+mean(pred.A)-mean(pred.null.A)
+# mean(pred.null.A)
+# 297.0384
+# mean(pred.A)
+# 331.0979
+# mean(pred.A)-mean(pred.null.A)
+# 34.05951
+```
+
+
+```{r checking residuals CalcMassGain PM}
+1 - pchisq(deviance(H2b.PM.m5), df.residual(H2b.PM.m5))
+
+resid=residuals(H2b.PM.m5, type = "pearson")
+pred=predict(H2b.PM.m5, type = "response")
+plot(H2b.PM.m5, which=1, col=c("blue")) 
+plot(H2b.PM.m5, which=2, col=c("red"))
+
+qqnorm(residuals(H2b.PM.m5))
+
+qqline(residuals(H2b.PM.m5))
+```
+
+
+### Partial Residual plots PM Mass Gain
+```{r Partial Residual plots PM Mass Gain}
+form5 <-  CalcMassGain ~ TotalHeadFSA + Age + DepartMass + (1|Year)
+H2b.PM.m5 <- lmer(form5, data=H2b.PM)
+
+### Partial residuals using predictor values
+#partialResidPMMG<-partial_residuals(H2b.PM.m5) |>
+  #ggplot(aes(x = .predictor_value, y = .partial_resid)) +
+  #geom_point() + # partial residuals
+  #geom_smooth(se = FALSE) + # smoothed residuals
+  #geom_line(aes(x = .predictor_value, y = .predictor_effect)) + # effects
+  #theme_classic()+
+  #facet_wrap(scales = "free") +
+  #labs(x = "Predictor", y = "Mass Gain (Residuals)")
+#partialResidPMMG
+
+
+###Partial residuals for frontal surface area, Head
+m<- lmer(TotalHeadFSA~ Age +  DepartMass + (1|Year)
+           ,  data=H2b.PM)
+m.1<-lmer(CalcMassGain~ Age +  DepartMass + (1|Year)
+           ,  data=H2b.PM)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+HFSA<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  labs(x = NULL, y ="Mass Gain (Residuals)")
+HFSA
+###Partial residuals for Departure Mass
+m<- lmer(DepartMass~ TotalHeadFSA +  Age + (1|Year)
+           ,  data=H2b.PM)
+m.1<-lmer(CalcMassGain~ TotalHeadFSA +  Age + (1|Year)
+           ,  data=H2b.PM)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+DM<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  labs(x = NULL, y = NULL)
+DM
+###Partial residuals for Age
+m<- lmer(Age~ TotalHeadFSA +  DepartMass + (1|Year)
+           ,  data=H2b.PM)
+m.1<-lmer(CalcMassGain~ TotalHeadFSA +  DepartMass + (1|Year)
+           ,  data=H2b.PM)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+A<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() + 
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_blank())
+A
+PMMG.figure<-grid.arrange(HFSA,DM,A, ncol = 3)
+annotate_figure(PMMG.figure,
+                bottom = "Residuals")
+
+InW=7; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+PMMG.figure<-grid.arrange(HFSA,DM,A, ncol = 3)
+annotate_figure(PMMG.figure,
+                bottom = "Residuals")
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\Partial_resid\\")  #sets working directory for where plot will be saved
+ggsave(paste("PMMGpartialResid.png", sep=''),  #save the plot and name it as you please
+       width=7*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```
+
+
+```{r H2b PB VIF}
+H2b.PB<-H2b.PB[!(H2b.PB$TOPPID=="2020011"),]
+H2b.PB<-H2b.PB[!(H2b.PB$TOPPID=="2006024"),]
+
+
+H2b.PB$CalcMassGain = as.integer(H2b.PB$CalcMassGain)
+form <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + HeadCount + Age + DepartMass + TripLength + (1|Year) #AIC: 
+H2b.PB.m <- lmer(form, data=H2b.PB)
+anova(H2b.PB.m)
+vif(H2b.PB.m)
+
+qqnorm(residuals(H2b.PB.m))
+qqline(residuals(H2b.PB.m))
+plot(H2b.PB$CalcMassGain)
+hist(H2b.PB$CalcMassGain)
+
+```
+
+
+
+```{r H2b PB model selection}
+
+form1 <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year) 
+form1a <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + Age + TripLength + (1|Year)
+form1b <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) 
+H2b.PB.m1 <- lmer(form1, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m1)
+H2b.PB.m1a <- lmer(form1a, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m1a)
+H2b.PB.m1b <- lmer(form1b, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m1b)
+
+anova(H2b.PB.m1,H2b.PB.m1a,H2b.PB.m1b)
+
+form2 <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+form2a <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + DepartMass:TripLength  
+
+form2b <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + TotalHeadFSA:TripLength
+
+form2c <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+form2d <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalBackFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+form2e <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+H2b.PB.m2 <- lmer(form2, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m2)
+H2b.PB.m2a <- lmer(form2a, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m2a)
+H2b.PB.m2b <- lmer(form2b, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m2b)
+H2b.PB.m2c <- lmer(form2c, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m2c)
+H2b.PB.m2d <- lmer(form2d, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m2d)
+H2b.PB.m2e <- lmer(form2e, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m2e)
+anova(H2b.PB.m2,H2b.PB.m2a,H2b.PB.m2b,H2b.PB.m2c,H2b.PB.m2d,H2b.PB.m2e)
+
+form3 <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+form3a <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + DepartMass:TripLength 
+form3b <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + TotalHeadFSA:TripLength
+form3c <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + TotalHeadFSA:TripLength
+form3d <-  CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+H2b.PB.m3 <- lmer(form3, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m3)
+H2b.PB.m3a <- lmer(form3a, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m3a)
+H2b.PB.m3b <- lmer(form3b, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m3b)
+H2b.PB.m3c <- lmer(form3c, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m3c)
+H2b.PB.m3d <- lmer(form3d, REML = FALSE, data=H2b.PB)
+anova(H2b.PB.m3,H2b.PB.m3a,H2b.PB.m3b,H2b.PB.m3c,H2b.PB.m3d)
+
+form4 <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:TripLength + TotalHeadFSA:TripLength
+form4a <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:TripLength 
+form4b <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TripLength
+form4c <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+H2b.PB.m4 <- lmer(form4, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m4)
+H2b.PB.m4a <- lmer(form4a, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m4a)
+H2b.PB.m4b <- lmer(form4b, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m4b)
+H2b.PB.m4c <- lmer(form4c, REML = FALSE, data=H2b.PB)
+anova(H2b.PB.m4,H2b.PB.m4a,H2b.PB.m4b,H2b.PB.m4c)
+
+form5 <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalHeadFSA:TripLength
+form5a <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength 
+form5b <- CalcMassGain ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TripLength
+form5c <- CalcMassGain ~ TotalHeadFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalHeadFSA:TripLength
+
+H2b.PB.m5 <- lmer(form5, REML = FALSE, data=H2b.PB)
+
+H2b.PB.m5a <- lmer(form5a, REML = FALSE, data=H2b.PB)
+#summary(H2b.PB.m5a)
+H2b.PB.m5b <- lmer(form5b, REML = FALSE, data=H2b.PB)
+H2b.PB.m5c <- lmer(form5c, REML = FALSE, data=H2b.PB)
+anova(H2b.PB.m5,H2b.PB.m5a,H2b.PB.m5b,H2b.PB.m5c)
+
+H2b.PB.m5c <- lmer(form5c, data=H2b.PB)
+summary(H2b.PB.m5c)
+r2_nakagawa(H2b.PB.m5c)
+lmerTest::step(H2b.PB.m2, ddf = c("Satterthwaite"), alpha.fixed = 0.05,
+  reduce.fixed = TRUE, reduce.random = FALSE)
+
+PBMGPartR2<-partR2(H2b.PB.m5c, partvars = c("TotalHeadFSA", "DepartMass", "TripLength", "DepartMass:TripLength", "TotalHeadFSA:TripLength"), 
+                  R2_type = "marginal", nboot = 20)
+PBMGPartR2
+
+new.dat = H2b.PB
+new.dat.0 = H2b.PB
+#new.dat$TotalHeadFSA = H2b.PB$TotalHeadFSA+sd(H2b.PB$TotalHeadFSA)
+new.dat.0$TotalHeadFSA = min(H2b.PB$TotalHeadFSA)
+new.dat$TotalHeadFSA = max(H2b.PB$TotalHeadFSA)
+#new.dat.0$TotalBackFSA = H2b.PB$TotalBackFSA
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2b.PB.m5c,newdata=new.dat.0 ,type = "response")
+pred.MG<-predict(H2b.PB.m5c, newdata=new.dat ,type = "response")
+mean(pred.MG)
+mean(pred.null)
+
+mean(pred.MG)-mean(pred.null)
+```
+
+```{r checking residuals CalcMassGain PB}
+1 - pchisq(deviance(H2b.PB.m5a), df.residual(H2b.PB.m5a))
+
+resid=residuals(H2b.PB.m5a, type = "pearson")
+pred=predict(H2b.PB.m5a, type = "response")
+plot(H2b.PB.m5a, which=1, col=c("blue")) 
+plot(H2b.PB.m5a, which=2, col=c("red"))
+qqnorm(residuals(H2b.PB.m5a))
+
+qqline(residuals(H2b.PB.m5a))
+```
+
+
+
+
+```{r model select triplength PB - MG}
+
+form <- TripLength ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + CalcMassGain +(1|Year) 
+H2b.PB.m <- lmer(form , data=H2b.PB)
+summary(H2b.PB.m)
+vif(H2b.PB.m)
+
+
+forma <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + CalcMassGain+(1|Year)    
+H2b.PB.ma <- lmer(forma , data=H2b.PB)
+
+formb <- TripLength ~ TotalHeadFSA + TotalBackFSA + Age + CalcMassGain  +(1|Year)  
+H2b.PB.mb <- lmer(formb , data=H2b.PB)
+AIC(H2b.PB.m,H2b.PB.ma,H2b.PB.mb)
+
+form1 <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass+ DepartMass:Age  +(1|Year) 
+form1a <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass  + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalHeadFSA:DepartMass+ DepartMass:Age  +(1|Year) 
+form1b <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalBackFSA:DepartMass + DepartMass:Age  +(1|Year) 
+form1c <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass  +(1|Year) 
+form1d <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass+ DepartMass:Age  +(1|Year) 
+
+H2b.PB.m1 <- lmer(form1 , data=H2b.PB)
+summary(H2b.PB.m1)
+H2b.PB.m1a <- lmer(form1a , data=H2b.PB)
+summary(H2b.PB.m1a)
+H2b.PB.m1b <- lmer(form1b , data=H2b.PB)
+summary(H2b.PB.m1b)
+H2b.PB.m1c <- lmer(form1c , data=H2b.PB)
+summary(H2b.PB.m1c)
+H2b.PB.m1d <- lmer(form1d , data=H2b.PB)
+summary(H2b.PB.m1d)
+
+AIC(H2b.PB.m1,H2b.PB.m1a,H2b.PB.m1b, H2b.PB.m1c,H2b.PB.m1d)
+
+form2a <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalHeadFSA:DepartMass+ DepartMass:Age  +(1|Year) 
+form2b <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalBackFSA:DepartMass + DepartMass:Age  +(1|Year) 
+
+form2c <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+TotalHeadFSA:DepartMass+ DepartMass:Age  +(1|Year) 
+form2d <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+TotalBackFSA:DepartMass + DepartMass:Age  +(1|Year) 
+
+form2e <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalHeadFSA:DepartMass +(1|Year) 
+form2f <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalBackFSA:DepartMass  +(1|Year) 
+
+form2g <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ DepartMass:Age    +(1|Year) 
+
+
+H2b.PB.m2a <- lmer(form2a , data=H2b.PB)
+summary(H2b.PB.m2a)
+H2b.PB.m2b <- lmer(form2b , data=H2b.PB)
+summary(H2b.PB.m2b)
+H2b.PB.m2c <- lmer(form2c , data=H2b.PB)
+summary(H2b.PB.m2c)
+H2b.PB.m2d <- lmer(form2d , data=H2b.PB)
+summary(H2b.PB.m2d)
+H2b.PB.m2e <- lmer(form2e , data=H2b.PB)
+summary(H2b.PB.m2e)
+H2b.PB.m2f <- lmer(form2f , data=H2b.PB)
+summary(H2b.PB.m2f)
+H2b.PB.m2g <- lmer(form2g , data=H2b.PB)
+summary(H2b.PB.m2g)
+
+AIC(H2b.PB.m2a,H2b.PB.m2b,H2b.PB.m2c, H2b.PB.m2d,H2b.PB.m2e,H2b.PB.m2f,H2b.PB.m2g)
+
+form3 <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ DepartMass:Age +(1|Year)  
+form3a <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  DepartMass:Age  +(1|Year) 
+form3b <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA +(1|Year) 
+
+H2b.PB.m3a <- lmer(form3a , data=H2b.PB)
+summary(H2b.PB.m3a)
+H2b.PB.m3b <- lmer(form3b , data=H2b.PB)
+summary(H2b.PB.m3b)
+H2b.PB.m3 <- lmer(form3 , data=H2b.PB)
+summary(H2b.PB.m3)
+
+AIC(H2b.PB.m3,H2b.PB.m3a,H2b.PB.m3b)
+
+form4<- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  DepartMass:Age +(1|Year)  
+form4a<- TripLength ~ TotalBackFSA + DepartMass + Age + CalcMassGain + 
+  DepartMass:Age  +(1|Year) 
+form4b<- TripLength ~ TotalHeadFSA + DepartMass + Age + CalcMassGain + 
+  DepartMass:Age  +(1|Year) 
+form4c<- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + 
+  DepartMass:Age  +(1|Year) 
+
+H2b.PB.m4 <- lmer(form4 , data=H2b.PB)
+summary(H2b.PB.m4)
+H2b.PB.m4a <- lmer(form4a , data=H2b.PB)
+summary(H2b.PB.m4a)
+H2b.PB.m4b <- lmer(form4b , data=H2b.PB)
+summary(H2b.PB.m4b)
+H2b.PB.m4c <- lmer(form4c , data=H2b.PB)
+summary(H2b.PB.m4c)
+
+AIC(H2b.PB.m4,H2b.PB.m4a,H2b.PB.m4b,H2b.PB.m4c)
+
+form5<- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + 
+  DepartMass:Age  +(1|Year) 
+form5a<- TripLength ~ TotalHeadFSA + DepartMass + Age + 
+  DepartMass:Age  +(1|Year) 
+form5b<- TripLength ~ TotalBackFSA + DepartMass + Age + 
+  DepartMass:Age  +(1|Year) 
+
+H2b.PB.m5 <- lmer(form5 , data=H2b.PB)
+summary(H2b.PB.m5)
+H2b.PB.m5a <- lmer(form5a , data=H2b.PB)
+summary(H2b.PB.m5a)
+H2b.PB.m5b <- lmer(form5b , data=H2b.PB)
+summary(H2b.PB.m5b)
+
+AIC(H2b.PB.m5,H2b.PB.m5a,H2b.PB.m5b)
+
+H2b.PB.m5a <- lmer(form5a, data=H2b.PB)
+summary(H2b.PB.m5a)
+#step(H2b.PB.m1, direction="backward") #gives H2b.PB.m5a
+#plot_model(H2b.PB.m5a, type = "pred", terms = c("DepartMass", "Age"))
+
+hist(resid(H2b.PB.m5a))
+qqnorm(residuals(H2b.PB.m5a))
+qqline(residuals(H2b.PB.m5a))
+library(sensemakr)
+#partial_f2(H2b.PB.m5a, covariates = "TotalHeadFSA") #small effect 0.0506
+#partial_f2(H2b.PB.m5a, covariates = "DepartMass")
+#partial_f2(H2b.PB.m5a, covariates = "Age")
+#partial_f2(H2b.PB.m5a, covariates = "DepartMass:Age")
+
+form1 <- TripLength ~ TotalHeadFSA + TotalBackFSA + DepartMass + CalcMassGain + 
+  TotalHeadFSA:TotalBackFSA+ TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass+ (1|Year) 
+H2b.PB.m1 <- lmer(form1 , data=H2b.PB)
+summary(H2b.PB.m1)
+
+lmerTest::step(H2b.PB.m1, ddf = c("Satterthwaite"), alpha.fixed = 0.05,
+  reduce.fixed = TRUE, reduce.random = FALSE)
+
+form1 <- TripLength ~ TotalHeadFSA + DepartMass+ (1|Year)
+H2b.PB.m1 <- lmer(form1 , data=H2b.PB)
+summary(H2b.PB.m1)
+r2_nakagawa(H2b.PB.m1)
+#> partial_f2(H2b.PB.m5a, covariates = "TotalHeadFSA") #small effect 0.0506
+#TotalHeadFSA 
+#  0.02952968 
+#> partial_f2(H2b.PB.m5a, covariates = "DepartMass")
+#  DepartMass 
+#0.0008257057 
+#> partial_f2(H2b.PB.m5a, covariates = "Age")
+#       Age 
+#0.02570005 
+#> partial_f2(H2b.PB.m5a, covariates = "DepartMass:Age")
+#DepartMass:Age 
+#     0.0170937 
+
+
+new.dat = H2b.PB
+new.dat.0 = H2b.PB
+new.dat$TotalHeadFSA = max(H2b.PB$TotalHeadFSA)
+new.dat.0$TotalHeadFSA = min(H2b.PB$TotalHeadFSA)
+#min(H2b.PB$TotalHeadFSA)
+#max(H2b.PB$TotalHeadFSA)
+pred.null.H<-predict(H2b.PB.m1, newdata=new.dat.0,type = "response")
+pred.tl.H<-predict(H2b.PB.m1, newdata=new.dat ,type = "response")
+mean(pred.null.H)
+mean(pred.tl.H)
+mean(pred.tl.H)-mean(pred.null.H)
+(mean(pred.tl.H)-mean(pred.null.H))/mean(pred.null.H)
+#> mean(pred.null.H)
+#[1] 72.93008
+#> mean(pred.tl.H)
+#[1] 78.9744
+#> mean(pred.tl.H)-mean(pred.null.H)
+#[1] 6.044314
+#> (mean(pred.tl.H)-mean(pred.null.H))/mean(pred.null.H)
+#[1] 0.08287821
+
+
+```
+
+### Partial Residual plots Trip Length
+```{r Partial Residual plots Trip Length}
+form1 <- TripLength ~ TotalHeadFSA + DepartMass+ (1|Year)
+H2b.PB.m1 <- lmer(form1 , data=H2b.PB)
+summary(H2b.PB.m1)
+
+TLPartR2<-partR2(H2b.PB.m1, partvars = c("TotalHeadFSA", "DepartMass"), 
+                  R2_type = "marginal", nboot = 20)
+TLPartR2
+### Partial residuals using predictor values
+#partialResidTL<-partial_residuals(H2b.PB.m1) |>
+ # ggplot(aes(x = .predictor_value, y = .partial_resid)) +
+#  geom_point() + # partial residuals
+#  geom_smooth(se = FALSE) + # smoothed residuals
+#  geom_line(aes(x = .predictor_value, y = #.predictor_effect)) + # effects
+#  theme_classic()+
+#  facet_wrap(scales = "free") +
+#  labs(x = "Predictor", y = "Trip Length (Residuals)")
+#partialResidTL
+
+
+###Partial residuals for frontal surface area, Head
+m<- lmer(TotalHeadFSA~ DepartMass + (1|Year)
+           ,  data=H2b.PB)
+m.1<-lmer(TripLength~ DepartMass + (1|Year)
+           ,  data=H2b.PB)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+HFSA<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) +   geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("a. Frontal Surface Area, Head")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y ="Trip Length (Residuals)")
+HFSA
+###Partial residuals for Departure Mass
+m.2<- lmer(DepartMass~ TotalHeadFSA + (1|Year)
+           ,  data=H2b.PB)
+m.3<-lmer(TripLength~ TotalHeadFSA +(1|Year)
+           ,  data=H2b.PB)
+m.2.resid=residuals(m.2, type = "pearson")
+m.3.resid=residuals(m.3, type = "pearson")
+
+DM<-ggplot(augment(m.2), aes(x = m.2.resid, y = m.3.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("b. Departure Mass")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y = NULL)
+DM
+
+TL.figure<-grid.arrange(HFSA,DM, ncol = 2)
+annotate_figure(TL.figure,
+                bottom = "Residuals")
+
+InW=5; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+TL.figure<-grid.arrange(HFSA,DM, ncol = 2)
+annotate_figure(TL.figure,
+                bottom = "Residuals")
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\Partial_resid\\")  #sets working directory for where plot will be saved
+ggsave(paste("TLpartialResid.png", sep=''),  #save the plot and name it as you please
+       width=5*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```

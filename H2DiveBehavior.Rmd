@@ -1,0 +1,2440 @@
+---
+title: "Hypothesis 2 Stat Analysis"
+author: "Kali Prescott"
+date: "2023-04-17"
+output: word_document
+---
+```{r packages}
+library(r2glmm)
+library(car)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(xtable)
+library(lubridate)
+library(data.table)
+library(ggpp)
+library(ggpmisc)
+library(countreg)
+library(brglm2)
+library(detectseparation)
+library(lme4)
+library(merTools)
+library(ciTools)
+library(afex) 
+library(stats)
+library(DHARMa)
+library(nlme)
+library(sjPlot)
+library(sjmisc)
+library(lmerTest)
+library(cAIC4)
+library(stats4)
+library(emmeans)
+library(regressinator)
+library(broom)
+library(effects)
+library(performance)
+```
+
+```{r import data}
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\TaggingEffectsData\\outfiles")
+data.tag.dt <- read.csv("data.tag.dt.csv")
+data.tag.db <- read.csv("data.tag.db.csv")
+
+data.tag.dt$TotalHeadFSA <- data.tag.dt$TotalHeadFSA*0.01
+data.tag.dt$TotalBackFSA <- data.tag.dt$TotalBackFSA*0.01
+data.tag.dt$FSATotal <- data.tag.dt$FSATotal*0.01
+
+data.tag.db$TotalHeadFSA <- data.tag.db$TotalHeadFSA*0.01
+data.tag.db$TotalBackFSA <- data.tag.db$TotalBackFSA*0.01
+data.tag.db$FSATotal <- data.tag.db$FSATotal*0.01
+
+data.tag.db$Botttime <- data.tag.db$Botttime/60
+data.tag.db$Dduration <- data.tag.db$Dduration/60
+
+```
+
+## Next I want to split by post-birth and post-molt just to look at the data
+
+```{r Split by Season}
+
+print("PB and PM Trips")
+#table(data.tag$Season)
+
+PB<-data.tag.db %>% filter(Season == "PB")
+PM<-data.tag.db %>% filter(Season == "PM")
+PM=subset(PM, SkipBreed == 1)
+#For Stats: Split data.tag into PM and PB 
+
+
+#PB<-data.tag %>% filter(Season == "PB")
+#A little data exploration
+hist(PB$Botttime)
+hist(PB$Maxdepth)
+hist(PB$Dduration)
+
+
+#PM<-data.tag %>% filter(Season == "PM")
+hist(PM$Botttime)
+hist(PM$Maxdepth)
+
+hist(PM$Dduration)
+
+```
+
+```{r splitting df}
+
+PB<-data.tag.db %>% filter(Season == "PB")
+PM<-data.tag.db %>% filter(Season == "PM")
+colnames(PM)
+PM=subset(PM, SkipBreed == 1)
+H2ai.PM = PM %>% dplyr::select(c("TOPPID", "SealID", "Year", "Age", "DepartMass", "Days.dec", "Days", "TotalHeadFSA", "TotalBackFSA", "HeadCount", "BackCount", "Botttime",  "Maxdepth","Dduration"))
+#"Duration" this is mean duration?         "StdDuration"      "MedDuration" "Duration90Pct"
+H2ai.PB = PB %>% dplyr::select(c("TOPPID", "SealID", "Year", "Age", "DepartMass", "Days.dec", "Days", "TotalHeadFSA", "TotalBackFSA", "HeadCount", "BackCount", "Botttime", "Maxdepth", "Dduration"))
+
+####https://cran.r-project.org/web/packages/glmm/glmm.pdf
+####https://stats.stackexchange.com/questions/512627/is-there-no-such-thing-as-a-multivariate-generalized-linear-mixed-model
+####tripnumber and seal and year as random effect
+
+#H2ai.PM$Maxdepth = as.integer(H2ai.PM$Maxdepth)
+#H2ai.PB$Maxdepth = as.integer(H2ai.PB$Maxdepth)
+#H2ai.PM$Botttime = as.integer(H2ai.PM$Botttime)
+#H2ai.PB$Botttime = as.integer(H2ai.PB$Botttime)
+#H2ai.PM$Dduration = as.integer(H2ai.PM$Dduration)
+#H2ai.PB$Dduration = as.integer(H2ai.PB$Dduration)
+H2ai.PM$Year = as.factor(H2ai.PM$Year)
+H2ai.PB$Year = as.factor(H2ai.PB$Year)
+H2ai.PM$TOPPID = as.factor(H2ai.PM$TOPPID)
+H2ai.PB$TOPPID = as.factor(H2ai.PB$TOPPID)
+H2ai.PM$Days = as.factor(H2ai.PM$Days)
+H2ai.PB$Days = as.factor(H2ai.PB$Days)
+
+hist(H2ai.PM$Botttime)
+hist(H2ai.PM$Maxdepth)
+hist(H2ai.PM$Dduration)
+hist(H2ai.PB$Botttime)
+hist(H2ai.PB$Maxdepth)
+hist(H2ai.PB$Dduration)
+H2ai.PM<- na.omit(H2ai.PM)
+```
+
+
+
+```{r dive parameters PB bt}
+
+H2ai.PB<-H2ai.PB[!(H2ai.PB$TOPPID=="2020011"),] #no data on this animal other than the tags deployed?
+H2ai.PB<-H2ai.PB[!(H2ai.PB$TOPPID=="2011001"),] #abnormally long trip length (128 days mass gain of 19kg)
+H2ai.PB<-H2ai.PB[!(H2ai.PB$TOPPID=="2006024"),] #only animal that lost weight
+
+```
+
+# H2a i. Dive parameters 
+
+## Two Generalized Linear Mixed Effects (post-breeding dives and post-molt dives)
+### Y = dPROX+βYr+βMDEP+βAg + βDoT + ID + ε
+### Y = DMAX, tDIVE, and tBOT
+### X = dPROX
+### Fixed effects = Yr, MDEP, Ag, DoT #may not need DoT maybe just Days at Sea/trip length?
+### Random effect = TOPPID or SealID if unique for each response variable.
+#### https://cran.r-hub.io/web/packages/MCMCglmm/vignettes/Overview.pdf
+## Examples
+#### dat<-data.frame(y=c(0,0,1,1), x=gl(2,2))
+### data with complete separation
+
+
+```{r model selection bottom time}
+#distribution of response looks gamma but trying to run with other distributions because gamma isn't working
+
+hist(H2ai.PM$Botttime)
+
+subsample<-H2ai.PM[sample(nrow(H2ai.PM), 250000), ] #subsample so it'll run faster as there are 1 mil obs, will run with all obs once I figure out which model is appropriate. shouldn't make a difference except with maybe the random effects which I will check once I sort out the distribution and residuals. So far the models with all of the obs the effect of the REs are small with Days being the largest and Year having little to no effect.
+
+form <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + (1|Year)
+H2ai.PM.m.bt.vif = lmer(form, data=H2ai.PM)
+#summary(H2ai.PM.m.bt.vif)
+vif(H2ai.PM.m.bt.vif) #looks good
+
+#First model attempt with default Guassian distro
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + (1|Year) + TotalHeadFSA:DepartMass  #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.bt = lmer(form.bt, data=subsample)
+#summary(H2ai.PM.m.bt)
+
+#checked residuals
+plot(resid(H2ai.PM.m.bt, type = "pearson") ~ fitted(H2ai.PM.m.bt)) #very funky cone shaped residuals
+plot(subsample$Dduration, resid(H2ai.PM.m.bt), xlab="Dduration", ylab="Residuals") #I plotted residuals against Dduration and there is definitely a pattern of increasing dispersion with increasing Dduration so bottom time has a lot of variability at greater dive duration
+plot(subsample$Dduration, resid(H2ai.PM.m.bt), xlab="Maxdepth", ylab="Residuals") #I plotted residuals against
+plot(subsample$Dduration, subsample$Botttime) #cone-shaped dispersion when plotted against eachother
+plot(subsample$Maxdepth, subsample$Botttime)
+qqnorm(resid(H2ai.PM.m.bt, type = "pearson")) 
+qqline(resid(H2ai.PM.m.bt, type = "pearson"))# not awful but still has a lot of dispersion at one end, makes sense
+isSingular(H2ai.PM.m.bt)
+shapiro.test(resid(H2ai.PM.m.bt))
+
+```
+
+
+```{r more model exploration}
+#Attempt at Gamma with a log link because the inverse link doesn't run and I'm pretty log is the closer of the two? 
+
+form.bt <-Botttime~ TotalHeadFSA + DepartMass  #+(1|Days) + (1|TOPPID) + (1|Year)  
+H2ai.PM.m.bt.1 = glm(form.bt, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.1)
+hist(resid(H2ai.PM.m.bt.1))
+plot(residuals(H2ai.PM.m.bt.1))
+#plot(subsample$Dduration, resid(H2ai.PM.m.bt.1), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PM.m.bt.1) ~ fitted(H2ai.PM.m.bt.1))
+qqnorm(resid(H2ai.PM.m.bt.1))
+qqline(resid(H2ai.PM.m.bt.1))
+simout  <-  simulateResiduals(H2ai.PM.m.bt.1, n = 500)
+plot(simout) 
+
+form.bt.2 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + DepartMass:Age + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID) + (1|Year)
+form.bt.3 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+form.bt.4 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|TOPPID) + (1|Year)
+form.bt.5 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) + (1|Year)
+form.bt.6 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) 
+form.bt.7 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|TOPPID)
+form.bt.8 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Year)
+
+H2ai.PM.m.bt.2 = glmer(form.bt.2, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.2)
+H2ai.PM.m.bt.3 = glmer(form.bt.3, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.3)
+H2ai.PM.m.bt.4 = glmer(form.bt.4, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.4)
+
+H2ai.PM.m.bt.5 = glmer(form.bt.5, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.5)
+
+H2ai.PM.m.bt.6 = glmer(form.bt.6, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.6)
+
+H2ai.PM.m.bt.7 = glmer(form.bt.7, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.7)
+
+H2ai.PM.m.bt.8 = glmer(form.bt.8, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PM.m.bt.8)
+
+anova(H2ai.PM.m.bt.2,H2ai.PM.m.bt.3,H2ai.PM.m.bt.4,H2ai.PM.m.bt.5,H2ai.PM.m.bt.6,H2ai.PM.m.bt.7,H2ai.PM.m.bt.8)
+
+
+form.bt.1 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + DepartMass:Age + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+form.bt.1a <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+form.bt.1b <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + (1|Days) + (1|TOPPID)
+
+H2ai.PM.m.bt.1 = glmer(form.bt.1, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.bt.1)
+#stepcAIC(
+#  H2ai.PM.m.bt.1,
+#  direction = "backward",
+#  data = H2ai.PM)
+
+H2ai.PM.m.bt.1a = glmer(form.bt.1a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.bt.1a)
+H2ai.PM.m.bt.1b = glmer(form.bt.1b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.bt.1b)
+
+anova(H2ai.PM.m.bt.1,H2ai.PM.m.bt.1a,H2ai.PM.m.bt.1b)
+
+form.bt.2a <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+form.bt.2b <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + (1|Days) + (1|TOPPID)
+anova(H2ai.PM.m.bt.2a,H2ai.PM.m.bt.2b)
+
+form.bt.3a <-Botttime ~ TotalHeadFSA +TotalBackFSA +DepartMass + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+form.bt.3b <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+
+H2ai.PM.m.bt.3a = glmer(form.bt.3a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.bt.3a)
+H2ai.PM.m.bt.3b = glmer(form.bt.3b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.bt.3b)
+
+anova(H2ai.PM.m.bt.3a,H2ai.PM.m.bt.3b,H2ai.PM.m.bt.3c)
+
+form.bt.4a <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+form.bt.4b <-Botttime ~ TotalHeadFSA + TotalBackFSA + (1|Days) + (1|TOPPID)
+form.bt.4c <-Botttime ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID)
+form.bt.4d <-Botttime ~ TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+form.bt.4e <-Botttime ~ DepartMass + (1|Days) + (1|TOPPID)
+
+H2ai.PM.m.bt.4a = glmer(form.bt.4a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.bt.4b = glmer(form.bt.4b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.bt.4c = glmer(form.bt.4c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.bt.4d = glmer(form.bt.4d, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.bt.4e= glmer(form.bt.4e, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+anova(H2ai.PM.m.bt.4a,H2ai.PM.m.bt.4b,H2ai.PM.m.bt.4c,H2ai.PM.m.bt.4d,H2ai.PM.m.bt.4e)
+#summary(H2ai.PM.m.bt.4e)
+form.bt.4e <-Botttime ~ DepartMass + (1|Days) + (1|TOPPID)
+H2ai.PM.m.bt.4e= glmer(form.bt.4e, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+
+
+#r2_nakagawa(H2ai.PM.m.bt.4e)
+###dependent on above
+library(r2glmm)
+
+r2 = r2beta(model=H2ai.PM.m.bt.4e,partial=TRUE)
+r2
+
+
+d.H = 7.755e-03/sqrt(0.022995+0.003504)
+d.H
+d.DM = 3.004e-03/sqrt(0.022995+0.003504)
+d.DM
+d.HDM = 3.080e-05/sqrt(0.022995+0.00349)
+d.HDM
+```
+
+
+
+
+```{r PM model selection max depth}
+
+form.md <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.1 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.2 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass  +  (1|TOPPID) + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.3 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.4 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.5 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.6 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+
+H2ai.PM.m.md = lmer(form.md, data=subsample)
+#summary(H2ai.PM.m.md) #effect from all random effects residuals are ok
+H2ai.PM.m.md.1 = lmer(form.md.1, data=subsample)
+#summary(H2ai.PM.m.md.1) 
+H2ai.PM.m.md.2 = lmer(form.md.2, data=subsample)
+#summary(H2ai.PM.m.md.2)
+H2ai.PM.m.md.3 = lmer(form.md.3, data=subsample)
+#summary(H2ai.PM.m.md.3) 
+H2ai.PM.m.md.4 = lmer(form.md.4, data=subsample)
+#summary(H2ai.PM.m.md.4) 
+H2ai.PM.m.md.5 = lmer(form.md.5, data=subsample)
+#summary(H2ai.PM.m.md.5) 
+H2ai.PM.m.md.6 = lmer(form.md.6, data=subsample)
+#summary(H2ai.PM.m.md.6) 
+anova(H2ai.PM.m.md, H2ai.PM.m.md.1, H2ai.PM.m.md.2, H2ai.PM.m.md.3, H2ai.PM.m.md.4, H2ai.PM.m.md.5, H2ai.PM.m.md.6)
+qqnorm(resid(H2ai.PM.m.md.1))
+qqline(resid(H2ai.PM.m.md.1))
+hist(resid(H2ai.PM.m.md.1))
+plot(resid(H2ai.PM.m.md.1, type = "pearson") ~ fitted(H2ai.PM.m.md.1))
+#shapiro.test(resid(H2ai.PM.m.md.1))
+
+
+form.md.1 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + DepartMass:Age
+form.md.1a <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass 
+form.md.1b <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA +  DepartMass:Age
+form.md.1c <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) +  TotalHeadFSA:DepartMass + DepartMass:Age
+
+
+H2ai.PM.m.md.1 = lmer(form.md.1, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.1)
+H2ai.PM.m.md.1a = lmer(form.md.1a, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.1a)
+H2ai.PM.m.md.1b = lmer(form.md.1b, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.1b)
+H2ai.PM.m.md.1c = lmer(form.md.1c, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.1c)
+
+anova(H2ai.PM.m.md.1, H2ai.PM.m.md.1a, H2ai.PM.m.md.1b,H2ai.PM.m.md.1c)
+
+form.md.2 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.2a <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA 
+form.md.2b <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass 
+
+H2ai.PM.m.md.2 = lmer(form.md.2, REML = FALSE, data=H2ai.PM)
+
+H2ai.PM.m.md.2a = lmer(form.md.2a, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.2a)
+H2ai.PM.m.md.2b = lmer(form.md.2b, REML = FALSE, data=H2ai.PM)
+
+
+anova(H2ai.PM.m.md.2, H2ai.PM.m.md.2a, H2ai.PM.m.md.2b)
+
+form.md.3 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass 
+form.md.3a <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass 
+form.md.3b <- Maxdepth ~ TotalHeadFSA + DepartMass + Age + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass 
+form.md.3c <- Maxdepth ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass 
+
+H2ai.PM.m.md.3 = lmer(form.md.3, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.3)
+H2ai.PM.m.md.3a = lmer(form.md.3a, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.3a)
+H2ai.PM.m.md.3b = lmer(form.md.3b, REML = FALSE, data=H2ai.PM)
+#summary(H2ai.PM.m.md.3b)
+H2ai.PM.m.md.3c = lmer(form.md.3c, REML = FALSE, data=H2ai.PM)
+summary(H2ai.PM.m.md.3c)
+anova(H2ai.PM.m.md.3, H2ai.PM.m.md.3a, H2ai.PM.m.md.3b,H2ai.PM.m.md.3c)
+
+summary(H2ai.PM.m.md.2)
+summary(H2ai.PM.m.md.2b)
+summary(H2ai.PM.m.md.3c)
+anova(H2ai.PM.m.md.2, H2ai.PM.m.md.3c, H2ai.PM.m.md.2b)
+lmerTest::step(H2ai.PM.m.md.1, ddf = c("Satterthwaite"), alpha.fixed = 0.05,
+  reduce.fixed = TRUE, reduce.random = FALSE)
+
+H2ai.PM.m.md.3c = lmer(form.md.3c, data=H2ai.PM)
+summary(H2ai.PM.m.md.3c)
+r2_nakagawa(H2ai.PM.m.md.3c)
+PMMDPartR2<-partR2(H2ai.PM.m.md.3c, partvars = c("TotalHeadFSA", "DepartMass","TotalHeadFSA:DepartMass"), 
+                  R2_type = "marginal", nboot = 10)
+PMMDPartR2
+library(emmeans)
+emmV <- emmeans(H2ai.PM.m.md.3c, ~ TotalHeadFSA, lmerTest.limit = 1083908, pbkrtest.limit = 1083908)
+eff_size(emmV, sigma = sigma(H2ai.PM.m.md.3c), edf = df.residual(H2ai.PM.m.md.3c))
+
+
+plot_model(H2ai.PM.m.md.3c, type = "pred", terms = c("TotalHeadFSA", "DepartMass"))
+
+new.dat = H2ai.PM
+new.dat.0 = H2ai.PM
+sd(H2ai.PM$TotalHeadFSA)/mean(H2ai.PM$TotalHeadFSA)
+max(H2ai.PM$DepartMass)
+min(H2ai.PM$DepartMass)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2ai.PM$TotalHeadFSA)
+#new.dat$DepartMass = max(H2ai.PM$DepartMass)
+new.dat.0$TotalHeadFSA = min(H2ai.PM$TotalHeadFSA)
+#new.dat.0$DepartMass = max(H2ai.PM$DepartMass)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2ai.PM.m.md.3c,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2ai.PM.m.md.3c, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+(mean(pred)-mean(pred.null))/mean(pred.null)
+
+d.H = 10.91570/sqrt(3798+1170)
+d.H
+d.DM = 0.47570/sqrt(3798+1170)
+d.DM
+d.HDM =  0.03528/sqrt(3798+1170)
+d.HDM
+```
+
+
+```{r pm max depth partial residual plots}
+
+#df <- data.frame(R,P1,P2,P1.P2=P1*P2)
+#lm.fit1 <- lm(R ~ ., df)
+#summary(lm.fit1)
+#crPlots(lm.fit1)
+
+###Partial residuals for frontal surface area, Head
+m<- lmer(TotalHeadFSA~ DepartMass + (1|Year) + (1|TOPPID)+ TotalHeadFSA:DepartMass,
+         control = lmerControl(optimizer ="Nelder_Mead")
+         ,  data=H2ai.PM)
+m.1<-lmer(Maxdepth~ DepartMass + (1|Year)+ (1|TOPPID)+ TotalHeadFSA:DepartMass
+          ,  data=H2ai.PM)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+HFSA<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("a. Frontal Surface Area, Head")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y ="Max Depth (Residuals)")
+HFSA
+###Partial residuals for Departure Mass
+m.2<- lmer(DepartMass~ TotalHeadFSA + (1|Year)+ (1|TOPPID)+ TotalHeadFSA:DepartMass
+         ,control = lmerControl(optimizer ="bobyqa")
+           ,  data=H2ai.PM)
+m.3<-lmer(Maxdepth~ TotalHeadFSA +  (1|Year)+ (1|TOPPID)+ TotalHeadFSA:DepartMass 
+           ,  data=H2ai.PM)
+m.2.resid=residuals(m.2, type = "pearson")
+m.3.resid=residuals(m.3, type = "pearson")
+
+DM<-ggplot(augment(m.2), aes(x = m.2.resid, y = m.3.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("b. Departure Mass")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y = NULL)
+
+
+PMMD.figure<-ggarrange(HFSA,DM, ncol = 2)
+annotate_figure(PMMD.figure,
+                bottom = "Residuals")
+
+InW=3; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+PMMD.figure<-ggarrange(HFSA, ncol = 1)
+annotate_figure(PMMD.figure,
+                bottom = "Residuals")
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\Partial_resid\\")  #sets working directory for where plot will be saved
+ggsave(paste("PMMDpartialResid.png", sep=''),  #save the plot and name it as you please
+       width=3*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```
+
+
+
+
+```{r Pm duration gamma}
+form.dur.ra <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass+Age +(1|Days) + (1|TOPPID)
+H2ai.PM.m.dur.ra = glmer(form.dur.ra, 
+                        #family=Gamma(link="log"),
+                       data=H2ai.PM)
+vif(H2ai.PM.m.dur.ra)
+
+simout  <-  simulateResiduals(H2ai.PM.m.dur.ra, n=500)
+plot(simout) 
+
+form.dur.r <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+H2ai.PM.m.dur.r = glm(form.dur.r, 
+                        family=Gamma(link="log"),data=subsample)
+
+
+simout  <-  simulateResiduals(H2ai.PM.m.dur.r, n=500)
+plot(simout) 
+
+
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID) + (1|Year) 
+H2ai.PM.m.dur.dty = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.dty)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID) 
+H2ai.PM.m.dur.dt = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.dt)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ (1|Days) + (1|Year) 
+H2ai.PM.m.dur.dy = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.dy)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ (1|TOPPID) + (1|Year) 
+H2ai.PM.m.dur.ty = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.ty)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ (1|Days) 
+H2ai.PM.m.dur.d = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.d)
+
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ (1|TOPPID) 
+H2ai.PM.m.dur.t = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.t)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ (1|Year) 
+H2ai.PM.m.dur.y = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PM.m.dur.y)
+
+anova(H2ai.PM.m.dur.dty,H2ai.PM.m.dur.dt,H2ai.PM.m.dur.dy,H2ai.PM.m.dur.ty,H2ai.PM.m.dur.d,H2ai.PM.m.dur.t,H2ai.PM.m.dur.y)
+#################################################
+
+form1 <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age+ TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ TotalBackFSA:DepartMass+(1|Days) + (1|TOPPID)  
+form1a <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Age+ TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID)
+form1b <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Age+ TotalHeadFSA:TotalBackFSA +TotalBackFSA:DepartMass+(1|Days) + (1|TOPPID)
+form1c <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Age+ TotalHeadFSA:DepartMass+TotalBackFSA:DepartMass+(1|Days) + (1|TOPPID)
+
+H2ai.PM.m.dur.1 = glmer(form1, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.1)
+stepcAIC(
+  H2ai.PM.m.dur.1,
+  direction = "backward",
+  data = H2ai.PM)
+
+H2ai.PM.m.dur.1a = glmer(form1a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.1a)
+H2ai.PM.m.dur.1b = glmer(form1b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.1b)
+H2ai.PM.m.dur.1c = glmer(form1c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.1c)
+
+anova(H2ai.PM.m.dur.1,H2ai.PM.m.dur.1a,H2ai.PM.m.dur.1b,H2ai.PM.m.dur.1c)
+
+
+
+form2a <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID)
+form2b <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA +TotalBackFSA:DepartMass+(1|Days) + (1|TOPPID)
+form2c <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA +(1|Days) + (1|TOPPID)
+form2d <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID)
+form2e <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalBackFSA:DepartMass+(1|Days) + (1|TOPPID)
+
+
+H2ai.PM.m.dur.2a = glmer(form2a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.2a)
+H2ai.PM.m.dur.2b = glmer(form2b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.2b)
+H2ai.PM.m.dur.2c = glmer(form2c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.2c)
+H2ai.PM.m.dur.2d = glmer(form2d, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.2d)
+H2ai.PM.m.dur.2e = glmer(form2e, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.2e)
+anova(H2ai.PM.m.dur.2a,H2ai.PM.m.dur.2b,H2ai.PM.m.dur.2c,H2ai.PM.m.dur.2d,H2ai.PM.m.dur.2e)
+
+form3 <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age +(1|Days) + (1|TOPPID)
+
+
+H2ai.PM.m.dur.3 = glmer(form3, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+#summary(H2ai.PM.m.dur.3)
+
+anova(H2ai.PM.m.dur.3,H2ai.PM.m.dur.2c,H2ai.PM.m.dur.2d,H2ai.PM.m.dur.2e)
+
+form4 <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age +(1|Days) + (1|TOPPID)
+form4a <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+form4b <-Dduration ~ TotalHeadFSA + TotalBackFSA + Age +(1|Days) + (1|TOPPID)
+form4c <-Dduration ~ TotalHeadFSA + DepartMass + Age +(1|Days) + (1|TOPPID)
+form4d <-Dduration ~ TotalBackFSA + DepartMass + Age +(1|Days) + (1|TOPPID)
+
+H2ai.PM.m.dur.4 = glmer(form4, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.4a = glmer(form4a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.4b = glmer(form4b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.4c = glmer(form4c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.4d = glmer(form4d, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+anova(H2ai.PM.m.dur.4,H2ai.PM.m.dur.4a,H2ai.PM.m.dur.4b,H2ai.PM.m.dur.4c,H2ai.PM.m.dur.4d)
+
+form5 <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+form5a <-Dduration ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID)
+form5b <-Dduration ~ TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+form5c <-Dduration ~ TotalHeadFSA + TotalBackFSA + (1|Days) + (1|TOPPID)
+
+H2ai.PM.m.dur.5 = glmer(form5, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.5a = glmer(form5a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.5b = glmer(form5b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.5c = glmer(form5c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+anova(H2ai.PM.m.dur.5,H2ai.PM.m.dur.5a,H2ai.PM.m.dur.5b,H2ai.PM.m.dur.5c)
+
+form6 <-Dduration ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID)
+form6a <-Dduration ~ DepartMass + (1|Days) + (1|TOPPID)
+form6b <-Dduration ~ TotalHeadFSA + (1|Days) + (1|TOPPID)
+
+H2ai.PM.m.dur.6 = glmer(form6, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.6a = glmer(form6a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+H2ai.PM.m.dur.6b = glmer(form6b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PM)
+anova(H2ai.PM.m.dur.6,H2ai.PM.m.dur.6a,H2ai.PM.m.dur.6b)
+summary(H2ai.PM.m.dur.6a)
+
+r2_nakagawa(H2ai.PM.m.dur.6a)
+emmV <- emmeans(H2ai.PM.m.dur.6a, ~ DepartMass)
+eff_size(emmV, sigma = sigma(H2ai.PM.m.dur.6a), edf = df.residual(H2ai.PM.m.dur.6a))
+install.packages("coop")
+library(coop)
+sparsity(H2ai.PM)
+r2 = r2beta(model=H2ai.PM.m.dur.6a,partial=TRUE)
+
+new.dat = H2ai.PM
+new.dat.0 = H2ai.PM
+sd(H2ai.PM$TotalHeadFSA)/mean(H2ai.PM$TotalHeadFSA)
+max(H2ai.PM$DepartMass)
+min(H2ai.PM$DepartMass)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2ai.PM$TotalHeadFSA)
+new.dat$DepartMass = max(H2ai.PM$DepartMass)
+new.dat.0$TotalHeadFSA = 8.3
+new.dat.0$DepartMass = max(H2ai.PM$DepartMass)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2ai.PM.m.md.3,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2ai.PM.m.md.3, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+d.H = 10.91570/sqrt(3798+1170)
+d.H
+d.DM = 0.47570/sqrt(3798+1170)
+d.DM
+d.HDM =  0.03528/sqrt(3798+1170)
+d.HDM
+```
+
+
+### PB: First Round model selection, Dive Param
+```{r dive parameters PB bt}
+
+H2ai.PB<-H2ai.PB[!(H2ai.PB$TOPPID=="2020011"),] #no data on this animal other than the tags deployed?
+H2ai.PB<-H2ai.PB[!(H2ai.PB$TOPPID=="2011001"),] #abnormally long trip length (128 days mass gain of 19kg)
+H2ai.PB<-H2ai.PB[!(H2ai.PB$TOPPID=="2006024"),] #only animal that lost weight
+
+```
+
+
+
+```{r PB bt gamma}
+subsample<-H2ai.PB[sample(nrow(H2ai.PB), 250000), ] 
+form.bt <-Botttime~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass +DepartMass:Age  #+(1|Days) + (1|TOPPID) + (1|Year)  
+H2ai.PB.m.bt.1 = glm(form.bt, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.1)
+hist(resid(H2ai.PB.m.bt.1))
+plot(residuals(H2ai.PB.m.bt.1))
+#plot(subsample$Dduration, resid(H2ai.PB.m.bt.1), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PB.m.bt.1) ~ fitted(H2ai.PB.m.bt.1))
+qqnorm(resid(H2ai.PB.m.bt.1))
+qqline(resid(H2ai.PB.m.bt.1))
+simout  <-  simulateResiduals(H2ai.PB.m.bt.1, n = 500)
+plot(simout) 
+
+form.bt <-Botttime~ TotalHeadFSA + TotalBackFSA + DepartMass + Age  +(1|Days) + (1|TOPPID) + (1|Year)  #+ TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass +DepartMass:Age
+H2ai.PB.m.bt.1 = glmer(form.bt, 
+                        #family=Gamma(link="log"),
+                        data=H2ai.PB)
+vif(H2ai.PB.m.bt.1)
+```
+
+
+```{r more model exploration}
+#Attempt at Gamma with a log link because the inverse link doesn't run and I'm pretty log is the closer of the two? 
+
+form.bt <-Botttime~ TotalBackFSA + DepartMass#+(1|Days) + (1|TOPPID) + (1|Year)  
+H2ai.PB.m.bt.1 = glm(form.bt, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.1)
+hist(resid(H2ai.PB.m.bt.1))
+plot(residuals(H2ai.PB.m.bt.1))
+#plot(subsample$Dduration, resid(H2ai.PB.m.bt.1), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PB.m.bt.1) ~ fitted(H2ai.PB.m.bt.1))
+qqnorm(resid(H2ai.PB.m.bt.1))
+qqline(resid(H2ai.PB.m.bt.1))
+simout  <-  simulateResiduals(H2ai.PB.m.bt.1, n = 500)
+plot(simout) 
+
+form.bt.2 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID) + (1|Year)
+form.bt.3 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+form.bt.4 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|TOPPID) + (1|Year)
+form.bt.5 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) + (1|Year)
+form.bt.6 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Days) 
+form.bt.7 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|TOPPID)
+form.bt.8 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + (1|Year)
+
+H2ai.PB.m.bt.2 = glmer(form.bt.2, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.2)
+H2ai.PB.m.bt.3 = glmer(form.bt.3, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.3)
+H2ai.PB.m.bt.4 = glmer(form.bt.4, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.4)
+
+H2ai.PB.m.bt.5 = glmer(form.bt.5, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.5)
+
+H2ai.PB.m.bt.6 = glmer(form.bt.6, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.6)
+
+H2ai.PB.m.bt.7 = glmer(form.bt.7, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.7)
+
+H2ai.PB.m.bt.8 = glmer(form.bt.8, 
+                        family=Gamma(link="log"),
+                        data=subsample)
+#summary(H2ai.PB.m.bt.8)
+
+anova(H2ai.PB.m.bt.2,H2ai.PB.m.bt.3,H2ai.PB.m.bt.4,H2ai.PB.m.bt.5,H2ai.PB.m.bt.6,H2ai.PB.m.bt.7,H2ai.PB.m.bt.8)
+
+
+form.bt.1 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass +(1|Days) + (1|TOPPID)
+form.bt.1a <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + (1|Days) + (1|TOPPID)
+form.bt.1b <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:DepartMass + (1|Days) + (1|TOPPID)
+
+
+H2ai.PB.m.bt.1 = glmer(form.bt.1, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.1)
+H2ai.PB.m.bt.1a = glmer(form.bt.1a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.1a)
+H2ai.PB.m.bt.1b = glmer(form.bt.1b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.1b)
+
+anova(H2ai.PB.m.bt.1,H2ai.PB.m.bt.1a,H2ai.PB.m.bt.1b)
+
+form.bt.2 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + (1|Days) + (1|TOPPID)
+form.bt.2a <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+
+
+H2ai.PB.m.bt.2a = glmer(form.bt.2a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.2a)
+H2ai.PB.m.bt.2 = glmer(form.bt.2, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.2)
+
+
+anova(H2ai.PB.m.bt.2,H2ai.PB.m.bt.2a)
+
+form.bt.3 <-Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+form.bt.3a <-Botttime ~ TotalHeadFSA + DepartMass+(1|Days) + (1|TOPPID)
+form.bt.3b <-Botttime ~ TotalHeadFSA + TotalBackFSA +(1|Days) + (1|TOPPID) 
+form.bt.3c <-Botttime ~ TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+
+H2ai.PB.m.bt.3 = glmer(form.bt.3, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.3)
+H2ai.PB.m.bt.3a = glmer(form.bt.3a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.3a)
+H2ai.PB.m.bt.3b = glmer(form.bt.3b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.3b)
+H2ai.PB.m.bt.3c = glmer(form.bt.3c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.3c)
+anova(H2ai.PB.m.bt.3,H2ai.PB.m.bt.3a,H2ai.PB.m.bt.3b,H2ai.PB.m.bt.3c)
+
+form.bt.4 <-Botttime ~ TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+form.bt.4a <-Botttime ~ DepartMass+(1|Days) + (1|TOPPID)
+form.bt.4b <-Botttime ~ TotalBackFSA + (1|Days) + (1|TOPPID)
+
+H2ai.PB.m.bt.4 = glmer(form.bt.4, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+
+H2ai.PB.m.bt.4a = glmer(form.bt.4a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.4a)
+H2ai.PB.m.bt.4b = glmer(form.bt.4b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.bt.4b)
+anova(H2ai.PB.m.bt.4,H2ai.PB.m.bt.4a,H2ai.PB.m.bt.4b) 
+
+interactionHB<-plot_model(H2ai.PB.m.bt.3, type = "pred", terms = c("TotalBackFSA", "TotalHeadFSA"))
+interactionHB
+summary(H2ai.PB.m.bt.4)
+ #              Estimate Std. Error t value Pr(>|z|)    
+#(Intercept)   1.6899651  0.1059033  15.958  < 2e-16 ***
+#TotalBackFSA -0.0110981  0.0040498  -2.740  0.00614 ** 
+#DepartMass    0.0027886  0.0003278   8.508  < 2e-16 ***
+library(performance)
+
+form.bt.4 <-Botttime ~ TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+H2ai.PB.m.bt.4 = glmer(form.bt.4, 
+                        family=Gamma(link="log"),
+                     data=H2ai.PB)
+
+r2 = r2beta(model=H2ai.PB.m.bt.4,partial=TRUE)
+r2
+r2_nakagawa(H2ai.PB.m.bt.4)
+
+remove(PB)
+H2ai.PB$TotalFSA = H2ai.PB$TotalHeadFSA + H2ai.PB$TotalBackFSA
+new.dat = H2ai.PB
+new.dat.0 = H2ai.PB
+sd(H2ai.PB$TotalHeadFSA)/mean(H2ai.PB$TotalHeadFSA)
+mean(H2ai.PB$TotalBackFSA)
+min(H2ai.PB$TotalBackFSA)
+max(H2ai.PB$DepartMass)
+min(H2ai.PB$DepartMass)
+
+#new.dat.0$TotalHeadFSA = min(H2ai.PB$TotalHeadFSA)
+new.dat.0$TotalBackFSA = min(H2ai.PB$TotalBackFSA)
+#new.dat$Age = max(H2ai.PB$Age)
+#new.dat$TotalHeadFSA = 43.2
+new.dat$TotalBackFSA = mean(H2ai.PB$TotalBackFSA)
+#new.dat.0$Age = min(H2ai.PB$Age)
+
+pred.null<-predict(H2ai.PB.m.bt.4,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2ai.PB.m.bt.4, newdata=new.dat ,type = "response", interval="confidence")
+
+mean(pred)
+mean(pred.null)
+(mean(pred)-mean(pred.null))/mean(pred.null)
+d.DM =  0.0027886/sqrt(0.004433 +0.007492)
+d.DM
+d.DM =  0.0027886/sqrt(0.004433 +0.007492)
+d.DM
+d.B = 0.0110981 /sqrt(0.004433 +0.007492)
+d.B
+
+```
+
+
+```{r pb bt partial residual plots}
+form.bt.4 <-Botttime ~ TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+#df <- data.frame(R,P1,P2,P1.P2=P1*P2)
+#lm.fit1 <- lm(R ~ ., df)
+#summary(lm.fit1)
+#crPlots(lm.fit1)
+
+library(optimx)
+###Partial residuals for frontal surface area, Back
+m<- glmer(TotalBackFSA~ DepartMass + (1|Days) + (1|TOPPID)
+          #,nAGQ=0,
+             #,control = glmerControl(optimizer = "bobyqa" 
+                                      #,optCtrl = list(maxfun=100000))
+          #, family=Gamma(link="identity")
+          , data=H2ai.PB)
+m.1<-glmer(Botttime ~ DepartMass+(1|Days) + (1|TOPPID),
+             control = glmerControl(optimizer = "bobyqa" ,
+                                      optCtrl = list(maxfun= 1000000))
+          , family=Gamma(link="log")
+          , data=H2ai.PB)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+BFSA<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("c. Frontal Surface Area, Back")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y ="Bottom Time (Residuals)")
+BFSA
+###Partial residuals for Departure Mass
+m.2<- glmer(DepartMass~ TotalBackFSA + (1|Days) + (1|TOPPID)
+          #, family=Gamma(link="log")
+          , data=H2ai.PB)
+m.3<-glmer(Botttime~ TotalBackFSA +  (1|Year)+ (1|TOPPID)
+           , family=Gamma(link="log")
+          , data=H2ai.PB)
+m.2.resid=residuals(m.2, type = "pearson")
+m.3.resid=residuals(m.3, type = "pearson")
+
+DM<-ggplot(augment(m.2), aes(x = m.2.resid, y = m.3.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("d. Departure Mass")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y = NULL)
+
+
+PBBT.figure<-ggarrange(BFSA,DM, ncol = 2)
+annotate_figure(PBBT.figure,
+                bottom = "Residuals")
+
+InW=5; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+PBBT.figure<-ggarrange(BFSA,DM, ncol = 2)
+annotate_figure(PBBT.figure,
+                bottom = "Residuals")
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\Partial_resid\\")  #sets working directory for where plot will be saved
+ggsave(paste("PBBTpartialResid.png", sep=''),  #save the plot and name it as you please
+       width=5*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```
+
+
+```{r pb visual}
+H2ai.PB.BT <- ggplot(data = H2ai.PB, aes(x=TotalBackFSA, y=Botttime)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Bottom Time (min)", 
+                     limits = c(0, 150), breaks = seq(0,150, by=25)
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Back-mounted Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("PB: Back-Mounted")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2ai.PB.BT
+
+H2ai.PB.DD <- ggplot(data = H2ai.PB, aes(x=TotalBackFSA, y=Dduration)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Dive Duration (min)", 
+                     limits = c(0, 150), breaks = seq(0,150, by=25)
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Back-mounted Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("PB")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2ai.PB.DD
+
+InW=6; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2ai.PB.DD,H2ai.PB.BT,
+          labels="auto", ncol = 2, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2ai.PB.BT.DD.pub.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=3*2.54, units='cm')
+
+H2ai.PM.MD <- ggplot(data = H2ai.PB, aes(x=TotalHeadFSA, y=Maxdepth)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #limits = c(0, 0.6), breaks = seq(0,0.6, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Head-mounted Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("PM")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2ai.PM.MD
+
+InW=3; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2ai.PM.MD,ncol = 1, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2ai.PM.MD.pub.png", sep=''),  #save the plot and name it as you please
+       width=3*2.54, height=3*2.54, units='cm')
+```
+
+
+
+
+``` {r PB maxdepth }
+
+###Testing Age vs DepartMass
+form.md <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age+ (1|Days) + (1|TOPPID) + (1|Year) #+ TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.1 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + (1|Year) #+ TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.2 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + Age+  (1|Days) + (1|TOPPID) + (1|Year) #+ TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+H2ai.PB.m.md = lmer(form.md, REML = FALSE, data=subsample)
+#summary(H2ai.PB.m.md) #effect from all random effects residuals are ok
+vif(H2ai.PB.m.md)
+H2ai.PB.m.md.1 = lmer(form.md.1, REML = FALSE, data=subsample)
+#summary(H2ai.PB.m.md.1) 
+H2ai.PB.m.md.2 = lmer(form.md.2, REML = FALSE, data=subsample)
+#summary(H2ai.PB.m.md.2)
+anova(H2ai.PB.m.md, H2ai.PB.m.md.1, H2ai.PB.m.md.2)
+# same AIC for both so go with Departmass
+
+form.md <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.1 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.2 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass  +  (1|TOPPID) + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.3 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.4 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.5 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+form.md.6 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass
+
+H2ai.PB.m.md = lmer(form.md, data=subsample)
+#summary(H2ai.PB.m.md) #effect from all random effects residuals are ok
+H2ai.PB.m.md.1 = lmer(form.md.1, data=subsample)
+#summary(H2ai.PB.m.md.1) 
+H2ai.PB.m.md.2 = lmer(form.md.2, data=subsample)
+#summary(H2ai.PB.m.md.2)
+H2ai.PB.m.md.3 = lmer(form.md.3, data=subsample)
+#summary(H2ai.PB.m.md.3) 
+H2ai.PB.m.md.4 = lmer(form.md.4, data=subsample)
+#summary(H2ai.PB.m.md.4) 
+H2ai.PB.m.md.5 = lmer(form.md.5, data=subsample)
+#summary(H2ai.PB.m.md.5) 
+H2ai.PB.m.md.6 = lmer(form.md.6, data=subsample)
+#summary(H2ai.PB.m.md.6) 
+anova(H2ai.PB.m.md, H2ai.PB.m.md.1, H2ai.PB.m.md.2, H2ai.PB.m.md.3, H2ai.PB.m.md.4, H2ai.PB.m.md.5, H2ai.PB.m.md.6)
+
+hist(resid(H2ai.PB.m.md.1))
+plot(resid(H2ai.PB.m.md.1, type = "pearson") ~ fitted(H2ai.PB.m.md.1))
+#shapiro.test(resid(H2ai.PB.m.md.1))
+
+form.md.1 <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass 
+H2ai.PB.m.md.1 = lmer(form.md.1, REML = FALSE, data=H2ai.PB)
+#summary(H2ai.PB.m.md.1)
+
+form.md.1a <- Maxdepth ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass
+H2ai.PB.m.md.1a = lmer(form.md.1a, REML = FALSE, data=H2ai.PB)
+#summary(H2ai.PB.m.md.1a)
+
+form.md.1b <- Maxdepth ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:TotalBackFSA 
+H2ai.PB.m.md.1b = lmer(form.md.1b, REML = FALSE, data=H2ai.PB)
+#summary(H2ai.PB.m.md.1b)
+
+anova(H2ai.PB.m.md.1,H2ai.PB.m.md.1a,H2ai.PB.m.md.1b)
+
+form.md.2 <- Maxdepth ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass
+H2ai.PB.m.md.2 = lmer(form.md.2, REML = FALSE, data=H2ai.PB)
+#summary(H2ai.PB.m.md.1a)
+
+form.md.2a <- Maxdepth ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID)
+H2ai.PB.m.md.2a = lmer(form.md.2a, REML = FALSE, data=H2ai.PB)
+#summary(H2ai.PB.m.md.1a)
+
+anova(H2ai.PB.m.md.2,H2ai.PB.m.md.2a)
+
+lmerTest::step(H2ai.PB.m.md.1, ddf = c("Satterthwaite"), alpha.fixed = 0.05,
+  reduce.fixed = TRUE, reduce.random = FALSE)
+
+summary(H2ai.PB.m.md.1a)
+r2_nakagawa(H2ai.PB.m.md.1a)
+library(partR2)
+form.md.1a <- Maxdepth ~ TotalHeadFSA+ DepartMass + (1|Days) + (1|TOPPID) + TotalHeadFSA:DepartMass
+H2ai.PB.m.md.1a = lmer(form.md.1a, data=H2ai.PB)
+PBMDPartR2<-partR2(H2ai.PB.m.md.1a, partvars = c("TotalHeadFSA", "DepartMass","TotalHeadFSA:DepartMass"), 
+                  R2_type = "marginal", nboot = 10)
+PBMDPartR2
+
+qqnorm(resid(H2ai.PB.m.md.1a))
+qqline(resid(H2ai.PB.m.md.1a))
+
+new.dat = H2ai.PB
+new.dat.0 = H2ai.PB
+sd(H2ai.PB$TotalHeadFSA)/mean(H2ai.PB$TotalHeadFSA)
+max(H2ai.PB$TotalHeadFSA)
+min(H2ai.PB$TotalHeadFSA)
+
+
+#new.dat.0$TotalHeadFSA = min(H2ai.PB$TotalHeadFSA)
+#new.dat.0$TotalBackFSA = 11.6
+new.dat$TotalHeadFSA = min(H2ai.PB$TotalHeadFSA)
+#new.dat$TotalHeadFSA = max(H2ai.PB$TotalHeadFSA)
+#new.dat$TotalBackFSA = 23.9
+new.dat.0$TotalHeadFSA = max(H2ai.PB$TotalHeadFSA)
+
+pred.null<-predict(H2ai.PB.m.md.4,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2ai.PB.m.md.4, newdata=new.dat ,type = "response", interval="confidence")
+
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+d.DM =  0.0027886/sqrt(0.004433 +0.007492)
+d.DM
+d.H = 0.0110981 /sqrt(0.004433 +0.007492)
+d.H
+
+subsample<-H2ai.PB[sample(nrow(H2ai.PB), 10000), ]
+plot(H2ai.PB.m.md.4)
+reg<-lm(Maxdepth ~ DepartMass+Dduration+Botttime, data = subsample)
+#summary(reg)
+plot(reg)
+abline(reg, col="red")
+```
+
+
+### PB: Dive duration
+```{r model select dive duration gamma PB}
+hist(H2ai.PB$Dduration)
+H2ai.PB$TotalFSA = H2ai.PB$TotalHeadFSA+H2ai.PB$TotalBackFSA
+subsample<-H2ai.PB[sample(nrow(H2ai.PB), 1000), ]
+hist(subsample$Dduration)
+
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|Days) + (1|TOPPID) + (1|Year) 
+H2ai.PB.m.dur.dty = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.dty)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|Days) + (1|TOPPID) 
+H2ai.PB.m.dur.dt = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.dt)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|Days) + (1|Year) 
+H2ai.PB.m.dur.dy = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.dy)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|TOPPID) + (1|Year) 
+H2ai.PB.m.dur.ty = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.ty)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|Days) 
+H2ai.PB.m.dur.d = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.d)
+
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|TOPPID) 
+H2ai.PB.m.dur.t = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.t)
+form.dur <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +Botttime+Maxdepth +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+ Maxdepth:Botttime+(1|Year) 
+H2ai.PB.m.dur.y = glmer(form.dur, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=subsample)
+#summary(H2ai.PB.m.dur.y)
+
+anova(H2ai.PB.m.dur.dty,H2ai.PB.m.dur.dt,H2ai.PB.m.dur.dy,H2ai.PB.m.dur.ty,H2ai.PB.m.dur.d,H2ai.PB.m.dur.t,H2ai.PB.m.dur.y)
+
+H2ai.PB$TotalFSA = H2ai.PB$TotalHeadFSA+H2ai.PB$TotalBackFSA
+form.dur.tfsa <-Dduration ~ TotalFSA + DepartMass +Botttime+Maxdepth + TotalFSA:DepartMass + Maxdepth:Botttime+(1|Days) + (1|TOPPID)  
+H2ai.PB.m.dur.tfsa = glmer(form.dur.tfsa, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.tfsa)
+
+form.dur.tfsa.1 <-Dduration ~ DepartMass +Botttime+Maxdepth + TotalFSA:DepartMass + Maxdepth:Botttime+(1|Days) + (1|TOPPID)  
+H2ai.PB.m.dur.tfsa.1 = glmer(form.dur.tfsa.1, 
+                        family=Gamma(link="log"),
+                        #weights = Botttime,
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.tfsa.1) 
+
+form <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age+(1|Days) + (1|TOPPID)  
+H2ai.PB.m.dur = glmer(form, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+vif(H2ai.PB.m.dur)
+
+form1 <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass +TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID)  
+form1a <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:TotalBackFSA + (1|Days) + (1|TOPPID)
+form1b <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:DepartMass+(1|Days) + (1|TOPPID)
+
+H2ai.PB.m.dur.1 = glmer(form1, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.1)
+H2ai.PB.m.dur.1a = glmer(form1a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.1a)
+H2ai.PB.m.dur.1b = glmer(form1b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.1b)
+
+anova(H2ai.PB.m.dur.1,H2ai.PB.m.dur.1a,H2ai.PB.m.dur.1b)
+
+
+form2 <-Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+
+
+H2ai.PB.m.dur.2 = glmer(form2, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+
+anova(H2ai.PB.m.dur.1a,H2ai.PB.m.dur.1b,H2ai.PB.m.dur.2)
+
+form3a <-Dduration ~ TotalHeadFSA + DepartMass + (1|Days) + (1|TOPPID)
+form3b <-Dduration ~ TotalHeadFSA + TotalBackFSA + (1|Days) + (1|TOPPID)
+form3c <-Dduration ~ TotalBackFSA + DepartMass + (1|Days) + (1|TOPPID)
+
+H2ai.PB.m.dur.3a = glmer(form3a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.3a)
+H2ai.PB.m.dur.3b = glmer(form3b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.3b)
+H2ai.PB.m.dur.3c = glmer(form3c, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+summary(H2ai.PB.m.dur.3c)
+anova(H2ai.PB.m.dur.2,H2ai.PB.m.dur.3a,H2ai.PB.m.dur.3b,H2ai.PB.m.dur.3c)
+
+form4a <-Dduration ~ DepartMass + (1|Days) + (1|TOPPID)
+form4b <-Dduration ~ TotalBackFSA + (1|Days) + (1|TOPPID)
+
+H2ai.PB.m.dur.4a = glmer(form4a, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.4a)
+H2ai.PB.m.dur.4b = glmer(form4b, 
+                        family=Gamma(link="log"),
+                        data=H2ai.PB)
+#summary(H2ai.PB.m.dur.4b)
+
+anova(H2ai.PB.m.dur.3c,H2ai.PB.m.dur.4a,H2ai.PB.m.dur.4b)
+
+summary(H2ai.PB.m.dur.3c)
+r2_nakagawa(H2ai.PB.m.dur.3c)
+
+new.dat = H2ai.PB
+new.dat.0 = H2ai.PB
+sd(H2ai.PB$TotalHeadFSA)/mean(H2ai.PB$TotalHeadFSA)
+max(H2ai.PB$TotalBackFSA)
+min(H2ai.PB$TotalBackFSA)
+
+#new.dat.0$TotalHeadFSA = 8.3
+#new.dat.0$TotalBackFSA = 11.6
+new.dat$TotalBackFSA = mean(H2ai.PB$TotalBackFSA)
+#new.dat$DepartMass = min(H2ai.PB$DepartMass)
+#new.dat$TotalHeadFSA = 43.2
+#new.dat$TotalBackFSA = 23.9
+new.dat.0$TotalBackFSA = min(H2ai.PB$TotalBackFSA)
+#new.dat.0$DepartMass = min(H2ai.PB$DepartMass)
+
+pred.null<-predict(H2ai.PB.m.dur.3c,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2ai.PB.m.dur.3c, newdata=new.dat ,type = "response", interval="confidence")
+
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+(mean(pred)-mean(pred.null))/mean(pred.null)
+
+plot_model(H2ai.PB.m.dur.tfsa, type = "pred", terms = c("TotalFSA", "DepartMass"))
+
+```
+
+```{r pb dd partial residual plots}
+form.bt.3c <-Dduration ~ TotalBackFSA + DepartMass+(1|Days) + (1|TOPPID)
+#df <- data.frame(R,P1,P2,P1.P2=P1*P2)
+#lm.fit1 <- lm(R ~ ., df)
+#summary(lm.fit1)
+#crPlots(lm.fit1)
+
+
+###Partial residuals for frontal surface area, Back
+m<- glmer(TotalBackFSA~ DepartMass + (1|Days) + (1|TOPPID)
+         # ,nAGQ=0
+          #   ,control = glmerControl(optimizer = "bobyqa" 
+           #                           ,optCtrl = list(maxfun=100000))
+          #, family=Gamma(link="identity")
+          , data=H2ai.PB)
+m.1<-glmer(Dduration ~ DepartMass+(1|Days) + (1|TOPPID),
+             control = glmerControl(optimizer = "bobyqa" ,
+                                      optCtrl = list(maxfun= 1000000))
+          , family=Gamma(link="log")
+          , data=H2ai.PB)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+BFSA<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("a. Frontal Surface Area, Back")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y ="Dive duration (Residuals)")
+BFSA
+###Partial residuals for Departure Mass
+m.2<- glmer(DepartMass~ TotalBackFSA + (1|Days) + (1|TOPPID)
+             #,control = glmerControl(optimizer = "bobyqa" ,
+              #                        optCtrl = list(maxfun= 1000000))
+          #, family=Gamma(link="log")
+          , data=H2ai.PB)
+m.3<-glmer(Dduration~ TotalBackFSA +  (1|Year)+ (1|TOPPID),
+             control = glmerControl(optimizer = "bobyqa" ,
+                                      optCtrl = list(maxfun= 1000000))
+           , family=Gamma(link="log")
+          , data=H2ai.PB)
+m.2.resid=residuals(m.2, type = "pearson")
+m.3.resid=residuals(m.3, type = "pearson")
+
+DM<-ggplot(augment(m.2), aes(x = m.2.resid, y = m.3.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("b. Departure Mass")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y = NULL)
+DM
+
+PBDD.figure<-ggarrange(BFSA,DM, ncol = 2)
+annotate_figure(PBDD.figure,
+                bottom = "Residuals")
+
+InW=5; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+
+PBDD.figure<-ggarrange(BFSA,DM, ncol = 2)
+annotate_figure(PBDD.figure,
+                bottom = "Residuals")
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\Partial_resid\\")  #sets working directory for where plot will be saved
+ggsave(paste("PBDDpartialResid.png", sep=''),  #save the plot and name it as you please
+       width=5*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```
+
+#### Visualization of sample characteristics
+```{r age departmass etc graphs}
+
+
+botTime <- ggplot(data = data.tag.db, aes(x=Season, y=BottTime, color=Season)) + 
+  geom_boxplot() +
+  #geom_smooth(method="gam", size = 1) +
+  scale_fill_manual(values=fillPalette) +
+  scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Bottom Time (min)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_discrete(name="Migration Sample Group") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. Bottom Time for Each Migration")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+botTime
+
+dDura <- ggplot(data = data.tag.db, aes(x=Season, y=Duration/60, color=Season)) + 
+  geom_boxplot() +
+  #geom_smooth(method="gam", size = 1) +
+  scale_fill_manual(values=fillPalette) +
+  scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Dive Duration (min)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_discrete(name="Migration Sample Group") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. Dive Duration for Each Migration")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+dDura
+
+MaxDep <- ggplot(data = data.tag.db, aes(x=Season, y=Maxdepth, color=Season)) + 
+  geom_boxplot() +
+  #geom_smooth(method="gam", size = 1) +
+  scale_fill_manual(values=fillPalette) +
+  scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_discrete(name="Migration Sample Group") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("c. Max Depth for Each Migration")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+MaxDep
+
+H2aii.PM.age.dm <- ggplot(data = H2aii.PM, aes(x=Age, y=DepartMass)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Departure Mass (kg)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Age (Years)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: Age by Departure Mass")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PM.age.dm
+
+H2aii.PB.age.dm <- ggplot(data = H2aii.PB, aes(x=Age, y=DepartMass)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Departure Mass (kg)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Age (Years)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PB: Age by Departure Mass")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PB.age.dm
+
+
+
+```
+
+#### Dive Parameters Visualization
+```{r H2aii Dive Param Data Visualization}
+H2ai.PM$FSATotal = H2ai.PM$TotalHeadFSA+H2ai.PM$TotalBackFSA
+H2ai.PB$FSATotal = H2ai.PB$TotalHeadFSA+H2ai.PB$TotalBackFSA
+fillPalette <- c("#999999","#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "orange", "#CC79A7")
+colPalette <- c("sienna3", "darkseagreen4", "gray39", "skyblue4", "goldenrod3", "royalblue4", "#D55E00", "firebrick3", "hotpink", "green3", "magenta4", "mediumpurple2", "black")
+H2ai.PM<- H2ai.PM %>%
+      mutate(AgeRange = case_when(
+        Age < 6 ~ '3-5',
+        Age > 8 ~ '9-13',
+        Age < 9 & Age >= 6 ~ '6-8'))
+H2ai.PM$AgeRange = as.factor(H2ai.PM$AgeRange)
+
+H2ai.PB<- H2ai.PB %>%
+      mutate(AgeRange = case_when(
+        Age < 7 ~ '4-6',
+        Age > 9 ~ '10-14',
+        Age < 10 & Age >= 7 ~ '7-9'))
+H2ai.PB$AgeRange = as.factor(H2ai.PB$AgeRange)
+
+H2ai.PM<- H2ai.PM %>%
+      mutate(DepMassRange = case_when(
+        DepartMass < 239 ~ 'small',
+        DepartMass > 296 ~ 'large',
+        DepartMass < 297 & DepartMass >= 239 ~ 'medium'))
+H2ai.PM$DepMassRange = as.factor(H2ai.PM$DepMassRange)
+
+H2ai.PB<- H2ai.PB %>%
+      mutate(DepMassRange = case_when(
+        DepartMass < 270 ~ 'small',
+        DepartMass > 346 ~ 'large',
+        DepartMass < 347 & DepartMass >= 270 ~ 'medium'))
+H2ai.PB$DepMassRange = as.factor(H2ai.PB$DepMassRange)
+
+H2ai.PM.FSA <- ggplot(data = H2ai.PM, aes(x=FSATotal, y=Maxdepth, #color=DepMassRange
+                                          )) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Devices")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2ai.PM.FSA
+
+H2ai.PB.FSA <- ggplot(data = H2ai.PB, aes(x=FSATotal, y=Maxdepth)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  scale_fill_manual(values=fillPalette) +
+  scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: All Devices")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2ai.PB.FSA
+
+H2ai.PM.HFSA <- ggplot(data = H2ai.PM, aes(x=TotalHeadFSA, y=Maxdepth)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("c. PM: Head-Mounted Devices")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2ai.PM.HFSA
+
+H2ai.PB.HFSA <- ggplot(data = H2ai.PB, aes(x=TotalHeadFSA, y=Maxdepth)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) + 
+  ggtitle("d. PB: Head-Mounted Devices")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2ai.PB.HFSA
+
+H2ai.PM.BFSA <- ggplot(data = H2ai.PM, aes(x=TotalBackFSA, y=Maxdepth)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("e. PM: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2ai.PM.BFSA
+
+H2ai.PB.BFSA <- ggplot(data = H2ai.PB, aes(x=TotalBackFSA, y=Maxdepth)) + 
+  geom_point(size = 1) +
+  geom_smooth(method="lm", color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Max Depth (m)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("f. PB: Back-Mounted Devices")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2ai.PB.BFSA
+
+InW=5; InH=7.5 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2ai.PM.FSA,H2ai.PB.FSA,H2ai.PM.HFSA,H2ai.PB.HFSA,H2ai.PM.BFSA,
+          H2ai.PB.BFSA, ncol = 2, nrow = 3)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2ai.DP.maxdepth.pub.png", sep=''),  #save the plot and name it as you please
+       width=5*2.54, height=7.5*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+ggarrange(H2ai.PM.FSA,H2ai.PB.FSA,H2ai.PM.HFSA,H2ai.PB.HFSA,H2ai.PM.BFSA,
+          H2ai.PB.BFSA, ncol = 2, nrow = 3)
+
+```
+
+########################### junk code ish ####################
+
+
+```{r check weighting}
+subsample<-H2ai.PM[sample(nrow(H2ai.PM), 50000), ] 
+hist(H2ai.PM$Botttime)
+hist(subsample$Botttime)
+# I think this means I should do a gamma weighted by Dduration? So trying to figure out the weighting
+#Might also need to do some kind of combine weighting with maxdepth
+varF <- varFixed(~ Maxdepth)
+varP <- varPower(form =~ Maxdepth)
+varE <- varExp(form =~ Maxdepth)
+varCP <- varConstPower(form =~ Maxdepth)
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.lm <- lm(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth, data=subsample)
+H2ai.PM.gls1 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth, weights=varF, data=subsample)
+H2ai.PM.gls2 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varP, data=subsample)
+#H2ai.PM.gls3 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varE, #data=subsample)
+H2ai.PM.gls4 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varCP, data=subsample)
+H2ai.PM.gls5 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varCB, data=subsample)
+varF <- varFixed(~ Dduration)
+varP <- varPower(form =~ Dduration)
+varE <- varExp(form =~ Dduration)
+varCP <- varConstPower(form =~ Dduration)
+H2ai.PM.gls6 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth, weights=varF, data=subsample)
+H2ai.PM.gls7 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varP, data=subsample)
+H2ai.PM.gls8 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varE, data=subsample)
+H2ai.PM.gls9 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varCP, data=subsample)
+
+anova(H2ai.PM.gls1,H2ai.PM.gls2,
+    #H2ai.PM.gls3,
+    H2ai.PM.gls4,H2ai.PM.gls6,H2ai.PM.gls7,H2ai.PM.gls8,H2ai.PM.gls9,H2ai.PM.gls5)
+#varCB is the best variance structure has the best AIC 470957.8
+#summary(H2ai.PM.gls5)
+Rgls5 <- resid(H2ai.PM.gls5, type = "normalized")
+plot(Rgls5 ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = subsample)
+#anova(H2ai.PM.lm, H2ai.PM.gls5)
+```
+
+```{r PM lme weight model selection bt}
+#just seeing how things are with the weighting and random effects in place
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt = lme(form.bt,
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt)
+R.bt <- resid(H2ai.PM.m.bt, type = "normalized")
+plot(R.bt ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = subsample)
+plot(subsample$Dduration, resid(H2ai.PM.m.bt), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PM.m.bt, type = "normalized") ~ fitted(H2ai.PM.m.bt))
+qqnorm(resid(H2ai.PM.m.bt, type = "normalized"))
+qqline(resid(H2ai.PM.m.bt, type = "normalized"))
+shapiro.test(resid(H2ai.PM.m.bt))
+
+
+#just seeing how things are with the weighting and random effects in place
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.dt = lme(form.bt,
+                   random=list(Days=~1 
+                               ,TOPPID=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt.dt)
+
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.ty = lme(form.bt,
+                   random=list(TOPPID=~1 
+                               ,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt.ty)
+
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.dy = lme(form.bt,
+                   random=list(Days=~1 
+                               ,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt.dy)
+
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.y = lme(form.bt,
+                   random=list(Year=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt.y)
+
+
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.d = lme(form.bt,
+                   random=list(Days=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt.d)
+
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass #+ Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.t = lme(form.bt,
+                   random=list(TOPPID=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.bt.t)
+
+logLik(H2ai.PM.m.bt)
+logLik(H2ai.PM.m.bt.dt)
+logLik(H2ai.PM.m.bt.ty)
+logLik(H2ai.PM.m.bt.dy)
+logLik(H2ai.PM.m.bt.d)
+logLik(H2ai.PM.m.bt.y)
+logLik(H2ai.PM.m.bt.t)
+anova(H2ai.PM.m.bt,H2ai.PM.m.bt.dt,H2ai.PM.m.bt.ty,H2ai.PM.m.bt.dy,H2ai.PM.m.bt.d,H2ai.PM.m.bt.y,H2ai.PM.m.bt.t)
+#keep all of the fixed effects
+#just seeing how things are with the weighting and random effects in place
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt = lme(form.bt, method="ML",
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   weights=varCB,
+                   data=H2ai.PM)
+#summary(H2ai.PM.m.bt)
+R.bt <- resid(H2ai.PM.m.bt, type = "normalized")
+#plot(R.bt ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = H2ai.PM)
+#plot(H2ai.PM$Dduration, resid(H2ai.PM.m.bt), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PM.m.bt, type = "normalized") ~ fitted(H2ai.PM.m.bt))
+qqnorm(resid(H2ai.PM.m.bt, type = "normalized"))
+qqline(resid(H2ai.PM.m.bt, type = "normalized"))
+#shapiro.test(resid(H2ai.PM.m.bt))
+
+form.bt.1 <- Botttime ~ TotalHeadFSA + DepartMass + Dduration + Maxdepth + Maxdepth:Dduration + TotalHeadFSA:DepartMass
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.1 = lme(form.bt.1, method="ML",
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PM)
+#summary(H2ai.PM.m.bt.1)
+
+form.bt.2<- Botttime ~ TotalHeadFSA + DepartMass + Dduration + Maxdepth + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.2 = lme(form.bt.2, method="ML",
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PM)
+#summary(H2ai.PM.m.bt.2)
+
+form.bt.3<- Botttime ~ TotalHeadFSA + Dduration + Maxdepth + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.3 = lme(form.bt.3, method="ML",
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PM)
+#summary(H2ai.PM.m.bt.3)
+
+form.bt.4<- Botttime ~ Dduration + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.4 = lme(form.bt.4,method="ML",
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PM)
+#summary(H2ai.PM.m.bt.4)
+anova(H2ai.PM.m.bt,H2ai.PM.m.bt.1,H2ai.PM.m.bt.2,H2ai.PM.m.bt.3,H2ai.PM.m.bt.4)
+
+form.bt.3<- Botttime ~ TotalHeadFSA + Dduration + Maxdepth + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PM.m.bt.3 = lme(form.bt.3,
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PM)
+#summary(H2ai.PM.m.bt.3)
+
+#H2ai.PM.m.bt.3 likely final model
+```
+
+
+
+```{r PM duration check weighting}
+# I think this means I should do a gamma weighted by Dduration? So trying to figure out the weighting
+#Might also need to do some kind of combine weighting with maxdepth
+
+subsample<-H2ai.PM[sample(nrow(H2ai.PM), 50000), ] 
+hist(H2ai.PM$Dduration)
+hist(subsample$Dduration)
+
+H2ai.PM.dur.lmer <- lmer(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth + TotalHeadFSA:DepartMass + Botttime:Maxdepth+(1|Days) + (1|TOPPID) + (1|Year), weights = Botttime, data=subsample)
+#summary(H2ai.PM.dur.lmer)
+qqnorm(resid(H2ai.PM.dur.lmer))
+qqline(resid(H2ai.PM.dur.lmer))
+hist(resid(H2ai.PM.dur.lmer))
+plot(resid(H2ai.PM.dur.lmer, type = "pearson") ~ fitted(H2ai.PM.dur.lmer))
+
+varF <- varFixed(~ Maxdepth)
+varP <- varPower(form =~ Maxdepth)
+varE <- varExp(form =~ Maxdepth)
+varCP <- varConstPower(form =~ Maxdepth)
+varCB1 <- varComb(varConstPower(form =~ Botttime), varConstPower(form =~ Maxdepth), varPower(form =~ DepartMass))
+varCB2 <- varComb(varConstPower(form =~ Botttime), varPower(form =~ DepartMass))
+varCB3 <- varComb(varConstPower(form =~ Botttime), varConstPower(form =~ Maxdepth))
+H2ai.PM.lm <- lm(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth, data=subsample)
+H2ai.PM.gls1 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth, weights=varF, data=subsample)
+H2ai.PM.gls2 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varP, data=subsample)
+H2ai.PM.gls3 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varE, data=subsample)
+H2ai.PM.gls4 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varCP, data=subsample)
+H2ai.PM.gls5.1 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varCB1, data=subsample)
+H2ai.PM.gls5.2 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varCB2, data=subsample)
+H2ai.PM.gls5.3 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varCB3, data=subsample)
+varF <- varFixed(~ Botttime)
+varP <- varPower(form =~ Botttime)
+varE <- varExp(form =~ Botttime)
+varCP <- varConstPower(form =~ Botttime)
+H2ai.PM.gls6 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth, weights=varF, data=subsample)
+H2ai.PM.gls7 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varP, data=subsample)
+H2ai.PM.gls8 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varE, data=subsample)
+H2ai.PM.gls9 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varCP, data=subsample)
+varF <- varFixed(~ DepartMass)
+varP <- varPower(form =~ DepartMass)
+varE <- varExp(form =~ DepartMass)
+varCP <- varConstPower(form =~ DepartMass)
+H2ai.PM.gls10 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth, weights=varF, data=subsample)
+H2ai.PM.gls11 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varP, data=subsample)
+#H2ai.PM.gls12 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varE, data=subsample)
+H2ai.PM.gls13 <- gls(Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime+ Maxdepth, weights=varCP, data=subsample)
+anova(H2ai.PM.gls1,H2ai.PM.gls2,
+    H2ai.PM.gls3,
+    H2ai.PM.gls4,H2ai.PM.gls5.1,H2ai.PM.gls5.2,H2ai.PM.gls5.3,H2ai.PM.gls6,H2ai.PM.gls7,H2ai.PM.gls8,H2ai.PM.gls9,H2ai.PM.gls10,H2ai.PM.gls11,
+    #H2ai.PM.gls12,
+    H2ai.PM.gls13)
+#varCB is the best variance structure has the best AIC 470957.8
+#summary(H2ai.PM.gls5.1)
+Rgls5 <- resid(H2ai.PM.gls5.1, type = "normalized")
+hist(Rgls5)
+plot(Rgls5)
+plot(Rgls5 ~ Botttime:Maxdepth, ylab = "Normalized residuals", data = subsample)
+plot(Rgls5 ~ fitted(H2ai.PM.gls5.1))
+#anova(H2ai.PM.lm, H2ai.PM.gls5)
+
+```
+
+```{r PM lme weight model selection dur}
+#just seeing how things are with the weighting and random effects in place
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+varCB1 <- varComb(varConstPower(form =~ Botttime), varConstPower(form =~ Maxdepth), varPower(form =~ DepartMass))
+H2ai.PM.m.dur = lme(form.dur,
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB1,
+                   data=subsample)
+#summary(H2ai.PM.m.dur)
+R.dur <- resid(H2ai.PM.m.dur, type = "normalized")
+hist(R.dur)
+plot(R.dur ~ Botttime, ylab = "Normalized residuals", data = subsample)
+plot(subsample$Botttime, resid(H2ai.PM.m.dur), xlab="Botttime", ylab="Residuals")
+plot(resid(H2ai.PM.m.dur, type = "normalized") ~ fitted(H2ai.PM.m.dur))
+qqnorm(resid(H2ai.PM.m.dur, type = "normalized"))
+qqline(resid(H2ai.PM.m.dur, type = "normalized"))
+#shapiro.test(resid(H2ai.PM.m.dur))
+
+
+#just seeing how things are with the weighting and random effects in place
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur.dt = lme(form.dur,
+                   random=list(Days=~1 
+                               ,TOPPID=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCP,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.dt)
+
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur.ty = lme(form.dur,
+                   random=list(TOPPID=~1 
+                               ,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.ty)
+
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur.dy = lme(form.dur,
+                   random=list(Days=~1 
+                               ,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.dy)
+
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur.y = lme(form.dur,
+                   random=list(Year=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.y)
+
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur.d = lme(form.dur,
+                   random=list(Days=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.d)
+
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur.t = lme(form.dur,
+                   random=list(TOPPID=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.t)
+
+logLik(H2ai.PM.m.dur)
+logLik(H2ai.PM.m.dur.dt)
+logLik(H2ai.PM.m.dur.ty)
+logLik(H2ai.PM.m.dur.dy)
+logLik(H2ai.PM.m.dur.d)
+logLik(H2ai.PM.m.dur.y)
+logLik(H2ai.PM.m.dur.t)
+anova(H2ai.PM.m.dur,H2ai.PM.m.dur.dt,H2ai.PM.m.dur.ty,H2ai.PM.m.dur.dy,H2ai.PM.m.dur.d,H2ai.PM.m.dur.y,H2ai.PM.m.dur.t)
+#keep all of the fixed effects
+#just seeing how things are with the weighting and random effects in place
+form.dur <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime +  Maxdepth+ TotalHeadFSA:DepartMass + Botttime:Maxdepth #full model with random effects and the interactions I most expect to be significant
+H2ai.PM.m.dur = lme(form.dur, method="ML",
+                   random=list(TOPPID=~1, Days=~1),
+                   weights=varCP,
+                   data=subsample)
+#summary(H2ai.PM.m.dur)
+R.dur <- resid(H2ai.PM.m.dur, type = "normalized")
+plot(R.dur ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = H2ai.PM)
+plot(H2ai.PM$Dduration, resid(H2ai.PM.m.dur), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PM.m.dur, type = "normalized") ~ fitted(H2ai.PM.m.dur))
+qqnorm(resid(H2ai.PM.m.dur, type = "normalized"))
+qqline(resid(H2ai.PM.m.dur, type = "normalized"))
+#shapiro.test(resid(H2ai.PM.m.dur))
+
+form.dur.1 <- Dduration ~ TotalHeadFSA + TotalBackFSA + DepartMass + Botttime + Maxdepth+ TotalHeadFSA:DepartMass+ Botttime:Maxdepth
+H2ai.PM.m.dur.1 = lme(form.dur.1, method="ML",
+                   random=list(TOPPID=~1, Days=~1),
+                   weights=varCB,
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   data=subsample)
+#summary(H2ai.PM.m.dur.1)
+
+form.dur.2<- Dduration ~ TotalHeadFSA + TotalBackFSA + Botttime + Maxdepth+ Botttime:Maxdepth
+H2ai.PM.m.dur.2 = lme(form.dur.2, method="ML",
+                   random=list(TOPPID=~1, Days=~1),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.2)
+
+form.dur.3<- Dduration ~ TotalBackFSA + Botttime +  Maxdepth+ Botttime:Maxdepth
+H2ai.PM.m.dur.3 = lme(form.dur.3, method="ML",
+                   random=list(TOPPID=~1, Days=~1),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.3)
+
+form.dur.4<- Dduration ~ Botttime +  Maxdepth+ Botttime:Maxdepth
+H2ai.PM.m.dur.4 = lme(form.dur.4, method="ML",
+                   random=list(TOPPID=~1, Days=~1),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PM.m.dur.4)
+anova(H2ai.PM.m.dur,H2ai.PM.m.dur.1,H2ai.PM.m.dur.2,H2ai.PM.m.dur.3,H2ai.PM.m.dur.4)
+
+#H2ai.PM.m.dur.4 likely final model
+```
+
+
+```{r PB lme weight model selection bt}
+
+#just seeing how things are with the weighting and random effects in place
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt = lme(form.bt,
+                   random=list(Year=~1 
+                               ,TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt)
+#vif(H2ai.PB.m.bt)
+R.bt <- resid(H2ai.PB.m.bt, type = "normalized")
+hist(R.bt)
+plot(R.bt ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = subsample)
+#plot(subsample$Dduration, resid(H2ai.PB.m.bt), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PB.m.bt, type = "normalized") ~ fitted(H2ai.PB.m.bt))
+qqnorm(resid(H2ai.PB.m.bt, type = "normalized"))
+qqline(resid(H2ai.PB.m.bt, type = "normalized"))
+#shapiro.test(resid(H2ai.PB.m.bt))
+
+
+#just seeing how things are with the weighting and random effects in place
+form.bt <-  Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.dt = lme(form.bt,
+                   random=list(Days=~1 
+                               ,TOPPID=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt.dt)
+
+form.bt <-  Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.ty = lme(form.bt,
+                   random=list(TOPPID=~1 
+                               ,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt.ty)
+
+form.bt <-  Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.dy = lme(form.bt,
+                   random=list(Days=~1 
+                               ,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt.dy)
+
+form.bt <-  Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.y = lme(form.bt,
+                   random=list(Year=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt.y)
+
+form.bt <-  Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.t = lme(form.bt,
+                   random=list(TOPPID=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt.t)
+
+form.bt <-  Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.d = lme(form.bt,
+                   random=list(Days=~1 
+                               #,Year=~1#, Days=~1 #won't converge with all of the random effects
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=subsample)
+#summary(H2ai.PB.m.bt.d)
+
+logLik(H2ai.PB.m.bt)
+logLik(H2ai.PB.m.bt.dt)
+logLik(H2ai.PB.m.bt.ty)
+logLik(H2ai.PB.m.bt.dy)
+logLik(H2ai.PB.m.bt.d)
+logLik(H2ai.PB.m.bt.y)
+logLik(H2ai.PB.m.bt.t)
+anova(H2ai.PB.m.bt,H2ai.PB.m.bt.dt,H2ai.PB.m.bt.ty,H2ai.PB.m.bt.dy,H2ai.PB.m.bt.d,H2ai.PB.m.bt.y,H2ai.PB.m.bt.t)
+
+#just seeing how things are with the weighting and random effects in place
+form.bt <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + TotalHeadFSA:DepartMass + Maxdepth:Dduration #full model with random effects and the interactions I most expect to be significant
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt = lme(form.bt, method="ML",
+                   random=list(TOPPID=~1, Days=~1 
+                               ),
+                    control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PB)
+#summary(H2ai.PB.m.bt)
+R.bt <- resid(H2ai.PB.m.bt, type = "normalized")
+plot(R.bt ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = H2ai.PB)
+plot(H2ai.PB$Dduration, resid(H2ai.PB.m.bt), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PB.m.bt, type = "normalized") ~ fitted(H2ai.PB.m.bt))
+qqnorm(resid(H2ai.PB.m.bt, type = "normalized"))
+qqline(resid(H2ai.PB.m.bt, type = "normalized"))
+#shapiro.test(resid(H2ai.PB.m.bt))
+
+form.bt.1 <- Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.1 = lme(form.bt.1, method="ML",
+                   random=list(TOPPID=~1, Days=~1 
+                               ),
+                    control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PB)
+#summary(H2ai.PB.m.bt.1)
+
+form.bt.2<- Botttime ~ TotalHeadFSA + TotalBackFSA + Dduration + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.2 = lme(form.bt.2, 
+                     #method="ML",
+                   random=list(TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PB)
+#summary(H2ai.PB.m.bt.2)
+
+form.bt.3<- Botttime ~ TotalBackFSA + Dduration + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.3 = lme(form.bt.3, method="ML",
+                   random=list(TOPPID=~1, Days=~1 
+                               ),
+                   control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PB)
+#summary(H2ai.PB.m.bt.3)
+
+form.bt.4<- Botttime ~ Dduration + Maxdepth:Dduration
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.m.bt.4 = lme(form.bt.4, 
+                     #method="ML",
+                   random=list(TOPPID=~1, Days=~1 
+                               ),control =list(msMaxIter = 1000, msMaxEval = 1000),
+                   weights=varCB,
+                   data=H2ai.PB)
+#summary(H2ai.PB.m.bt.4)
+anova(H2ai.PB.m.bt,H2ai.PB.m.bt.1,H2ai.PB.m.bt.2,H2ai.PB.m.bt.3,H2ai.PB.m.bt.4)
+R.bt <- resid(H2ai.PB.m.bt.4, type = "normalized")
+hist(R.bt)
+plot(R.bt ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = H2ai.PB)
+#plot(subsample$Dduration, resid(H2ai.PB.m.bt), xlab="Dduration", ylab="Residuals")
+plot(resid(H2ai.PB.m.bt.4, type = "normalized") ~ fitted(H2ai.PB.m.bt.4))
+qqnorm(resid(H2ai.PB.m.bt.4, type = "normalized"))
+qqline(resid(H2ai.PB.m.bt.4, type = "normalized"))
+#shapiro.test(resid(H2ai.PB.m.bt))
+
+mean(H2ai.PB$Botttime)
+H2ai.PB$TotalFSA = H2ai.PB$TotalHeadFSA + H2ai.PB$TotalBackFSA
+new.dat = H2ai.PB
+new.dat.0 = H2ai.PB
+sd(H2ai.PB$TotalHeadFSA)/mean(H2ai.PB$TotalHeadFSA)
+max(H2ai.PB$TotalHeadFSA)
+min(H2ai.PB$TotalHeadFSA)
+
+
+new.dat.0$TotalHeadFSA = 8.3
+new.dat.0$TotalBackFSA = 11.6
+#new.dat$DepartMass = min(H2ai.PB$DepartMass)
+new.dat$TotalHeadFSA = 43.2
+new.dat$TotalBackFSA = 23.9
+#new.dat.0$DepartMass = min(H2ai.PB$DepartMass)
+
+pred.null<-predict(H2ai.PB.m.bt.2,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2ai.PB.m.bt.2, newdata=new.dat ,type = "response", interval="confidence")
+
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+```
+
+```{r PB bt check weighting}
+hist(H2ai.PB$Botttime)
+subsample<-H2ai.PB[sample(nrow(H2ai.PB), 100000), ]
+hist(subsample$Botttime)
+
+# I think this means I should do a gamma weighted by Dduration? So trying to figure out the weighting
+#Might also need to do some kind of combine weighting with maxdepth
+varF <- varFixed(~ Maxdepth)
+varP <- varPower(form =~ Maxdepth)
+varE <- varExp(form =~ Maxdepth)
+varCP <- varConstPower(form =~ Maxdepth)
+varCB <- varComb(varConstPower(form =~ Dduration), varConstPower(form =~ Maxdepth))
+H2ai.PB.lm <- lm(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth, data=subsample)
+H2ai.PB.gls1 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth, weights=varF, data=subsample)
+H2ai.PB.gls2 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varP, data=subsample)
+H2ai.PB.gls3 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varE, data=subsample)
+H2ai.PB.gls4 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varCP, data=subsample)
+H2ai.PB.gls5 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varCB, data=subsample)
+varF <- varFixed(~ Dduration)
+varP <- varPower(form =~ Dduration)
+varE <- varExp(form =~ Dduration)
+varCP <- varConstPower(form =~ Dduration)
+H2ai.PB.gls6 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration + Maxdepth, weights=varF, data=subsample)
+H2ai.PB.gls7 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varP, data=subsample)
+H2ai.PB.gls8 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varE, data=subsample)
+H2ai.PB.gls9 <- gls(Botttime ~ TotalHeadFSA + TotalBackFSA + DepartMass + Dduration+ Maxdepth, weights=varCP, data=subsample)
+
+anova(H2ai.PB.gls1,H2ai.PB.gls2,
+    H2ai.PB.gls3,
+    H2ai.PB.gls4,H2ai.PB.gls6,H2ai.PB.gls7,H2ai.PB.gls8,H2ai.PB.gls9,H2ai.PB.gls5)
+#varCB is the best variance structure has the best AIC 470957.8
+#summary(H2ai.PB.gls5)
+Rgls5 <- resid(H2ai.PB.gls5, type = "normalized")
+plot(Rgls5 ~ Dduration:Maxdepth, ylab = "Normalized residuals", data = subsample)
+hist(Rgls5)
+#anova(H2ai.PB.lm, H2ai.PB.gls5)
+```

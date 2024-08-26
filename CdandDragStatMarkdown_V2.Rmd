@@ -1,0 +1,501 @@
+---
+title: "Multiple Regression Cd and Drag Stats with SERDUP as a Back Tag"
+author: "Kali Prescott"
+date: "2023-05-01"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r packages}
+
+library(dplyr)
+library(car)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(xtable)
+library(lubridate)
+library(data.table)
+
+library(sensemakr)
+library(ggpp)
+library(ggpmisc)
+
+```
+
+#### With SERDUP as a back tag
+
+```{r data reup cd}
+cd.stat <- read.csv("cd.stat.serdup.head.csv")
+cd.stat <- cd.stat %>% select(c("Cd", "TotalHeadFrontalSA", "TotalBackFrontalSA", "HeadCount", "BackCount"))
+plot(cd.stat)
+cor(cd.stat) 
+```
+
+```{r cd plots with outlier}
+
+cd.stat$TotalFSA = cd.stat$TotalHeadFrontalSA+cd.stat$TotalBackFrontalSA
+form1 <- Cd ~ TotalFSA
+m1 <- lm(form1,  data=cd.stat)
+summary(m1)
+
+fillPalette <- c("#999999","#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "orange", "#CC79A7")
+colPalette <- c("sienna3", "gray39", "skyblue4", "darkseagreen4", "goldenrod3", "royalblue4", "#D55E00", "firebrick3", "hotpink", "green3", "magenta4", "mediumpurple2", "black")
+cd.FSA <- ggplot(data = cd.stat, aes(x=TotalFSA, y=Cd, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Cd", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Total Frontal Surface Area of Devices") +
+  theme(axis.title.y = element_text(color = "black", face = "bold", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", face = "bold", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", face = "bold", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", face = "bold", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("Cd by Total Frontal Surface Area of Devices")+
+  theme(plot.title = element_text(size = 10, face = "bold"))
+cd.FSA
+
+
+
+InW=4; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+cd.FSA
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("cd.FSA.png", sep=''),  #save the plot and name it as you please
+       width=4*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+```
+
+### Model selection with Serdup as a back tag
+```{r setting up model cd serdup back}
+form1 <- Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA + HeadCount + BackCount
+m1 <- lm(form1,  data=cd.stat)
+summary(m1)
+vif(m1)
+#Vif values are fine (less than 5) so can go through the interactions
+
+#All interactions
+m2 <- lm(Cd ~ TotalHeadFrontalSA * TotalBackFrontalSA * HeadCount * BackCount,  data=cd.stat)
+#summary(m2)
+m3 <- lm(Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA + HeadCount * BackCount,  data=cd.stat)
+#summary(m3)
+m4 <- lm(Cd ~ TotalHeadFrontalSA * TotalBackFrontalSA + HeadCount + BackCount,  data=cd.stat)
+#summary(m4)
+m5 <- lm(Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA * HeadCount + BackCount,  data=cd.stat)
+#summary(m5)
+m6 <- lm(Cd ~ TotalHeadFrontalSA * TotalBackFrontalSA * HeadCount + BackCount,  data=cd.stat)
+#summary(m6)
+m7 <- lm(Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA * HeadCount * BackCount,  data=cd.stat)
+#summary(m7)
+AIC(m1,m2,m3,m4,m5,m6,m7)
+#There are no interactions indicated by any of the models so commented out the summaries for all but m1 to keep output simple
+#Going with m1 based on the AIC and there are no significant interactions.
+
+```
+### Check Residuals and Calculate Partial R2 to determine effect size of each covariate
+#### Effect size	f 2
+#### Small	≥ 0.02
+#### Medium	≥ 0.15
+#### Large	≥ 0.35
+
+```{r partial r2 for Cd}
+plot(m1, which=1, col=c("blue")) 
+plot(m1, which=2, col=c("red"))
+partial_r2(m1, covariates = "TotalHeadFrontalSA") #large effect
+partial_r2(m1, covariates = "TotalBackFrontalSA") #no effect
+partial_r2(m1, covariates = "HeadCount") #small effect
+partial_r2(m1, covariates = "BackCount") #no effect
+```
+## residuals are not great
+## with SERDUP as a back tag only Total Head FSA is significant and has a large effect, HeadCount has a small, non-significant effect 
+
+## Try without SERDUP
+
+```{r repeat stat without SERDUP}
+setwd("C:\\Users\\User\\Documents\\College\\MLMLMasters\\Thesis\\TaggingEffectsData\\ModelledDragData")
+cd.stat.2 <- read.csv("cd.stat.serdup.back.2.csv")
+cd.stat.2 <- cd.stat.2 %>% dplyr::select(c("Cd", "TotalHeadFrontalSA", "TotalBackFrontalSA", "HeadCount", "BackCount", "DeploymentLabel","SatTag"))
+plot(cd.stat.2)
+cor(cd.stat.2) 
+
+```
+
+```{r cd plots without outlier}
+
+cd.stat.2$TotalFSA = cd.stat.2$TotalHeadFrontalSA+cd.stat.2$TotalBackFrontalSA
+form1 <- Cd ~ TotalFSA
+m1 <- lm(form1,  data=cd.stat.2)
+summary(m1)
+
+fillPalette <- c("#999999","#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "orange", "#CC79A7")
+colPalette <- c("sienna3", "gray39", "skyblue4", "darkseagreen4", "goldenrod3", "royalblue4", "#D55E00", "firebrick3", "hotpink", "green3", "magenta4", "mediumpurple2", "black")
+cd.2.FSA <- ggplot(data = cd.stat.2, aes(x=TotalFSA, y=Cd, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Cd", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("a. All Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+cd.2.FSA
+
+cd.2.HFSA <- ggplot(data = cd.stat.2, aes(x=TotalHeadFrontalSA, y=Cd, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Cd", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black",size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("b. Head Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+cd.2.HFSA
+
+cd.2.BFSA <- ggplot(data = cd.stat.2, aes(x=TotalBackFrontalSA, y=Cd, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Cd", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("c. Back Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+cd.2.BFSA
+
+cd.plot <- read.csv("cd.group.plot.csv")
+
+fillPalette <- c("#999999","#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "orange", "#CC79A7")
+colPalette <- c("sienna3", "green3", "skyblue4", "darkseagreen4", "goldenrod3", "royalblue4",  "firebrick3", "magenta4", "green3", "#CC79A7", "mediumpurple2", "black")
+cd.FSA.3 <- ggplot(data = cd.plot, aes(x=FrontalSA, y=Cd, color=Group
+                                         )) + 
+  geom_point(size = 1) +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  scale_fill_manual(values=fillPalette) +
+  scale_color_manual(values=fillPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Cd", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Total Frontal Surface Area of Devices") +
+  theme(axis.title.y = element_text(color = "black", face = "bold", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", face = "bold", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", face = "bold", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", face = "bold", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("Cd by Total Frontal Surface Area of Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+cd.FSA.3
+
+cd.FSA.named <- ggplot(data = cd.stat.2, aes(x=TotalFSA, y=Cd, #label = DeploymentLabel, 
+                                             color=SatTag)) + 
+  stat_ellipse() +
+  geom_point(size=2) +
+  #geom_text(hjust=0.5, vjust=-0.75, size=1.5) +
+  #scale_fill_manual(values=fillPalette) +
+  scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Drag Coefficient (Cd)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #ylim(0,60000)+
+    scale_x_continuous(name="Total Frontal Surface Area of Devices") +
+  theme(axis.title.y = element_text(color = "black", face = "bold", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", face = "bold", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", face = "bold", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", face = "bold", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("Drag Coefficient by Total Frontal Surface Area") +
+  theme(plot.title = element_text(size = 8, face = "bold"))
+cd.FSA.named
+InW=6; InH=4 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+cd.FSA.named
+#ggarrange(cd.2.FSA, cd.2.HFSA, cd.2.BFSA, nrow= 1, ncol= 3)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("cd.FSA.ellipse.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=4*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+```
+
+```{r no SERDUP models}
+form1 <- Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA + HeadCount + BackCount
+m1 <- lm(form1,  data=cd.stat.2)
+summary(m1)
+vif(m1)
+#Vif values are fine so can go through the interactions
+
+#All interactions
+
+m2 <- lm(Cd ~ TotalHeadFrontalSA * TotalBackFrontalSA * HeadCount * BackCount,  data=cd.stat.2)
+summary(m2)
+m3 <- lm(Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA + HeadCount * BackCount,  data=cd.stat.2)
+#summary(m3)
+m4 <- lm(Cd ~ TotalHeadFrontalSA * TotalBackFrontalSA + HeadCount + BackCount,  data=cd.stat.2)
+summary(m4)
+m5 <- lm(Cd ~ TotalHeadFrontalSA * TotalBackFrontalSA * HeadCount + BackCount,  data=cd.stat.2)
+summary(m5)
+m6 <- lm(Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA * HeadCount + BackCount,  data=cd.stat.2)
+summary(m6)
+m7 <- lm(Cd ~ TotalHeadFrontalSA + TotalBackFrontalSA * HeadCount * BackCount,  data=cd.stat.2)
+summary(m7)
+AIC(m1,m2,m3,m4,m5,m6,m7)
+#m5 has the lowest AIC but only one interaction term is significant (TotalBackFrontalSA:HeadCount). When I removed the non-significant interaction terms simplify the model (m6) the interaction between TotalBackFrontalSA:HeadCount is no longer significant. Models 3, 4, and 7 have no significant interactions as well (commented out the summaries to simplify output). The m2 with interactions for all terms also shows no significant interactions. I think I will go with m1 and remove the interactions.
+
+
+```
+
+### Check Residuals and Calculate partial r2 to determine effect size of each covariate
+#### Effect size	f 2
+#### Small	≥ 0.02
+#### Medium	≥ 0.15
+#### Large	≥ 0.35
+```{r partial r2 for Cd no serdup}
+plot(m1, which=1, col=c("blue")) 
+plot(m1, which=2, col=c("red"))
+partial_r2(m1, covariates = "TotalHeadFrontalSA") #large effect
+partial_r2(m1, covariates = "TotalBackFrontalSA") #medium effect
+partial_r2(m1, covariates = "HeadCount") #medium effect
+partial_r2(m1, covariates = "BackCount") #small effect
+
+
+new.dat <- data.frame(TotalBackFrontalSA=844,TotalHeadFrontalSA=1937,HeadCount=1.592593, BackCount=1.333333) #mean frontal surface area of head devices 
+predict(m1, newdata = new.dat, interval = 'confidence')
+```
+### With the outlier removed the effects of the other variables are more noticeable but the largest effect is the Surface area of the head tags and the head count with small effect from the surface area of the backtags. So position is important, specifically the head, but surface area more so, or rather position may deminish the importance of the surface area as well as number of tags.
+
+# Reupload drag data with serdup as back
+```{r data drag serdup as back}
+setwd("C:\\Users\\User\\Documents\\College\\MLMLMasters\\Thesis\\TaggingEffectsData\\ModelledDragData")
+drag.stat <- read.csv("drag.stat.csv")
+drag.stat <- drag.stat %>% dplyr::select(c("Drag", "TotalHeadFrontalSA", "TotalBackFrontalSA", "HeadCount", "BackCount", "DeploymentLabel"))
+plot(drag.stat)
+cor(drag.stat) 
+
+```
+
+```{r drag data visualization}
+
+drag.stat$TotalFSA = drag.stat$TotalHeadFrontalSA+drag.stat$TotalBackFrontalSA
+form1 <- Drag ~ TotalFSA
+m1 <- lm(form1,  data=drag.stat)
+summary(m1)
+
+
+fillPalette <- c("#999999","#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "orange", "#CC79A7")
+colPalette <- c("sienna3", "gray39", "skyblue4", "darkseagreen4", "goldenrod3", "royalblue4", "#D55E00", "firebrick3", "hotpink", "green3", "magenta4", "mediumpurple2", "black")
+drag.FSA <- ggplot(data = drag.stat, aes(x=TotalFSA, y=Drag, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Drag", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("a. All Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+drag.FSA
+
+drag.HFSA <- ggplot(data = drag.stat, aes(x=TotalHeadFrontalSA, y=Drag, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Drag", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("b. Head Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+drag.HFSA
+
+drag.BFSA <- ggplot(data = drag.stat, aes(x=TotalBackFrontalSA, y=Drag, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Drag", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm^2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("c. Back Devices")+
+  theme(plot.title = element_text(size = 8, face = "bold"))
+drag.BFSA
+
+
+fillPalette <- c("#999999","#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "orange", "#CC79A7")
+colPalette <- c("sienna3", "gray39", "skyblue4", "darkseagreen4", "goldenrod3", "royalblue4", "#D55E00", "firebrick3", "hotpink", "green3", "magenta4", "mediumpurple2", "black")
+drag.FSA.2 <- ggplot(data = drag.stat, aes(x=TotalFSA, y=Drag, #color=SealID
+                                         )) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Drag (N)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Total Frontal Surface Area of Devices") +
+  theme(axis.title.y = element_text(color = "black", face = "bold", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", face = "bold", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", face = "bold", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", face = "bold", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("Drag by Total Frontal Surface Area of Devices")+
+  theme(plot.title = element_text(size = 10, face = "bold"))
+drag.FSA.2
+
+
+InW=6.5; InH=2.5 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(drag.FSA, drag.HFSA, drag.BFSA, nrow=1, ncol=3)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("drag.FSA.all.noR2.png", sep=''),  #save the plot and name it as you please
+       width=6.5*2.54, height=2.5*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+```
+### Setting up the model with and without interactions - Drag with serdup as a back tag
+
+```{r setting up model drag serdup back}
+form1 <- Drag ~ TotalHeadFrontalSA + TotalBackFrontalSA + HeadCount + BackCount
+m1 <- lm(form1,  data=drag.stat)
+summary(m1)
+vif(m1)
+#Vif values are all >5 so can check for interactions
+
+m2 <- lm(Drag ~ TotalHeadFrontalSA * TotalBackFrontalSA * HeadCount * BackCount,  data=drag.stat)
+summary(m2)
+m3 <- lm(Drag ~ TotalHeadFrontalSA + TotalBackFrontalSA + HeadCount * BackCount,  data=drag.stat)
+summary(m3)
+m4 <- lm(Drag ~ TotalHeadFrontalSA * TotalBackFrontalSA + HeadCount + BackCount,  data=drag.stat)
+summary(m4)
+m5 <- lm(Drag ~ TotalHeadFrontalSA * TotalBackFrontalSA * HeadCount + BackCount,  data=drag.stat)
+summary(m5)
+m6 <- lm(Drag ~ TotalHeadFrontalSA + TotalBackFrontalSA * HeadCount + BackCount,  data=drag.stat)
+#summary(m6)
+m7 <- lm(Drag ~ TotalHeadFrontalSA + TotalBackFrontalSA * HeadCount * BackCount,  data=drag.stat)
+#summary(m7)
+AIC(m1,m2,m3,m4,m5,m6,m7)
+# m4 has the lowest AIC but there is only one significant interaction (TotalHeadFrontalSA:TotalBackFrontalSA). m2 does not show this interaction, but m5 shows a p-value of 0.065 for this interaction. Because of the AIC I will move forward with m4 and leave this interaction in. (m2, m6, and m7 have no significant interactions so commented out the summaries to shorten output)
+```
+
+### Calculate Partial R2 to determine effect size of each covariate
+#### Effect size	f 2
+#### Small	≥ 0.02
+#### Medium	≥ 0.15
+#### Large	≥ 0.35
+
+```{r partial r2 for drag}
+plot(m1, which=1, col=c("blue")) 
+plot(m1, which=2, col=c("red"))
+partial_r2(m1, covariates = "TotalHeadFrontalSA") #large effect
+partial_r2(m1, covariates = "TotalBackFrontalSA") #medium effect
+partial_r2(m1, covariates = "HeadCount") #medium effect
+partial_r2(m1, covariates = "BackCount") #small effect
+
+new.dat <- data.frame(TotalBackFrontalSA=920,TotalHeadFrontalSA=1968,HeadCount=1.571429 , BackCount=1.357143) #mean frontal surface area of head devices 
+predict(m1, newdata = new.dat, interval = 'confidence')
+```
+## residuals are fine
+## With Serdup as a Back Tag, Total Head FSA has the largest effect, Total Back FSA is also significant with a medium effect size. There is an interaction between these two variables. Surface area is the most important but there is an influence of position that may deminish the impact of surface area. Head and BackCount have small, non-significant effects with head count having a larger effect than backcount.

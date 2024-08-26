@@ -1,0 +1,2996 @@
+---
+title: "H2DiveTypes"
+author: "Kali Prescott"
+date: "2024-01-14"
+output: pdf_document
+---
+
+```{r packages}
+
+library(car)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(xtable)
+library(lubridate)
+library(data.table)
+library(ggpp)
+library(ggpmisc)
+library(countreg)
+library(brglm2)
+library(detectseparation)
+library(lme4)
+library(merTools)
+library(ciTools)
+library(broom)
+library(afex) 
+library(stats)
+library(DHARMa)
+library(nlme)
+library(sjPlot)
+library(sjmisc)
+library(performance) # for Nakagawa conditional/marginal R2
+library(partR2)
+library(regressinator)
+library(broom)
+library(effects)
+library(gridExtra)
+```
+
+# H2a ii. Dive type
+
+## Two General Linear Models (post-molt dives and post-birth dives)
+### DIVEfrg = β0+ dPROX+βYr+βMDEP+βAg+βDAS
+### y = DIVEfrg
+### X = dPROX
+### Fixed effects = Yr, MDEP, Ag, DoT <- I think this can just be DAS/TripLength  
+### I realized that I didn't include a random effect because this model is a GLM not a GLMM. So it doesn't make sense that I would be resampling for every day of trip since I'm looking at the overall proportion of V-Shaped dives per animal. I took out the random effect and changed Day of Trip to TripLength to control for how long the animal was at sea.
+
+
+## Next Calculate the VIF scores and test for Multi-colinearity
+
+### The value for VIF starts at 1 and has no upper limit. A general rule of thumb for interpreting VIFs is as follows:
+
+### A value of 1 indicates there is no correlation between a given predictor variable and any other predictor variables in the model.
+### A value between 1 and 5 indicates moderate correlation between a given predictor variable and other predictor variables in the model, but this is often not severe enough to require attention.
+### A value greater than 5 indicates potentially severe correlation between a given predictor variable and other predictor variables in the model. In this case, the coefficient estimates and p-values in the regression output are likely unreliable.
+## For generalized VIF
+### https://stats.stackexchange.com/questions/70679/which-variance-inflation-factor-should-i-be-using-textgvif-or-textgvif
+### This thread explains GVIF vs VIF where to my understanding GVIF defaults to VIF when the DF=1. GVIF for DF>1 must be interpretted using the GVIF(1/(2×Df))<2.
+### The rule of GVIF(1/(2×Df))<2 is applied in some publications, which would equal to an ordinary VIF of 4 for one-coefficient variables
+
+```{r H2aii Dive Type data prep}
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\TaggingEffectsData\\outfiles")
+data.tag.dt <- read.csv("data.tag.dt.csv")
+
+data.tag.dt$TotalHeadFSA <- data.tag.dt$TotalHeadFSA*0.01
+data.tag.dt$TotalBackFSA <- data.tag.dt$TotalBackFSA*0.01
+data.tag.dt$FSATotal <- data.tag.dt$FSATotal*0.01
+
+
+data.tag.dt$PctJagged = data.tag.dt$PctForage
+data.tag.dt$NumVShape=data.tag.dt$PctJagged*data.tag.dt$NumDives
+
+data.tag.dt$PctForage = data.tag.dt$PctJagged + data.tag.dt$PctBenthic
+mean(data.tag.dt$PctForage)
+sd(data.tag.dt$PctForage)
+mean(data.tag.dt$PctTransit)
+sd(data.tag.dt$PctTransit)
+
+#data.tag.dt$TotalHeadFSA <- data.tag.dt$TotalHeadFSA*0.01
+#data.tag.dt$TotalBackFSA <- data.tag.dt$TotalBackFSA*0.01
+#data.tag.dt$FSATotal <- data.tag.dt$FSATotal*0.01
+PB<-data.tag.dt %>% filter(Season == "PB")
+PM<-data.tag.dt %>% filter(Season == "PM")
+PM=subset(PM, SkipBreed == 1)
+H2aii.PM = PM %>% dplyr::select(c("TOPPID", "Year", "DepartMass", "Age", "TripLength", "CalcMassGain", "MassGainRate", "NumDives", 
+                           "TotalHeadFSA", "TotalBackFSA", "SkipBreed", "PctJagged", "PctDrift", "PctBenthic", "PctTransit", "PctForage", "TotDist", "MaxDist", "SatTagType"))
+H2aii.PB = PB %>% dplyr::select(c("TOPPID", "Year", "DepartMass", "Age", "TripLength", "CalcMassGain", "MassGainRate", "NumDives", 
+                           "TotalHeadFSA", "TotalBackFSA", "PctJagged", "PctDrift", "PctBenthic", "PctTransit", "PctForage", "TotDist", "MaxDist", "SatTagType"))
+H2aii.PB<-H2aii.PB[!(H2aii.PB$TOPPID=="2006024"),]
+H2aii.PM=subset(H2aii.PM, SkipBreed == 1)
+H2aii.PM$Year <- as.factor(H2aii.PM$Year)
+H2aii.PB$Year <- as.factor(H2aii.PB$Year)
+H2aii.PB$MaxDist <- as.integer(H2aii.PB$MaxDist)
+H2aii.PM$MaxDist <- as.integer(H2aii.PM$MaxDist)
+H2aii.PB$TotDist <- as.integer(H2aii.PB$TotDist)
+H2aii.PM$TotDist <- as.integer(H2aii.PM$TotDist)
+hist(H2aii.PM$PctJagged)
+hist(H2aii.PB$PctJagged)
+
+print("PM:Mean and Std Dev Proportion of Jagged-bottom Dives")
+mean(data.tag.dt$PctJagged)
+sd(data.tag.dt$PctJagged)
+min(data.tag.dt$PctJagged)
+max(data.tag.dt$PctJagged)
+
+
+print("PB:Mean and Std Dev Proportion of Jagged-bottom Dives")
+mean(H2aii.PB$PctJagged)
+sd(H2aii.PB$PctJagged)
+min(H2aii.PB$PctJagged)
+max(H2aii.PB$PctJagged)
+
+print("PM:Mean and Std Dev Proportion of V-shaped Dives")
+mean(data.tag.dt$PctTransit)
+sd(data.tag.dt$PctTransit)
+min(data.tag.dt$PctTransit)
+max(data.tag.dt$PctTransit)
+
+print("PB:Mean and Std Dev Proportion of V-shaped Dives")
+mean(H2aii.PB$PctTransit)
+sd(H2aii.PB$PctTransit)
+min(H2aii.PB$PctTransit)
+max(H2aii.PB$PctTransit)
+
+print("PM:Mean and Std Dev Proportion of Drift Dives")
+mean(data.tag.dt$PctDrift)
+sd(data.tag.dt$PctDrift)
+min(data.tag.dt$PctDrift)
+max(data.tag.dt$PctDrift)
+print("PB:Mean and Std Dev Proportion of Drift Dives")
+mean(H2aii.PB$PctDrift)
+sd(H2aii.PB$PctDrift)
+min(H2aii.PB$PctDrift)
+max(H2aii.PB$PctDrift)
+
+print("PM:Mean and Std Dev Proportion of Benthic Dives")
+mean(data.tag.dt$PctBenthic)
+sd(data.tag.dt$PctBenthic)
+min(data.tag.dt$PctBenthic)
+max(data.tag.dt$PctBenthic)
+print("PB:Mean and Std Dev Proportion of Benthic Dives")
+mean(H2aii.PB$PctBenthic)
+sd(H2aii.PB$PctBenthic)
+min(H2aii.PB$PctBenthic)
+max(H2aii.PB$PctBenthic)
+
+
+min(H2aii.PB$Age)
+max(H2aii.PB$Age)
+
+min(H2aii.PM$Age)
+max(H2aii.PM$Age)
+```
+
+
+```{r PM dive type PctJagged model prep}
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+H2aii.PM.m <- lmer(form, data=H2aii.PM)
+summary(H2aii.PM.m)
+hist(resid(H2aii.PM.m))
+plot(resid(H2aii.PM.m))
+qqnorm(resid(H2aii.PM.m))
+qqline(resid(H2aii.PM.m))
+min(H2aii.PM$DepartMass)
+max(H2aii.PM$DepartMass)
+min(H2aii.PM$TotalHeadFSA)
+max(H2aii.PM$TotalHeadFSA)
+min(H2aii.PM$TotalBackFSA)
+max(H2aii.PM$TotalBackFSA)
+mean(H2aii.PM$TotalBackFSA)
+vif(H2aii.PM.m)
+
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)
+H2aii.PB.m <- lmer(form, data=H2aii.PB)
+summary(H2aii.PB.m)
+vif(H2aii.PB.m)
+hist(resid(H2aii.PB.m))
+plot(resid(H2aii.PB.m))
+qqnorm(resid(H2aii.PB.m))
+qqline(resid(H2aii.PB.m))
+min(H2aii.PB$DepartMass)
+max(H2aii.PB$DepartMass)
+min(H2aii.PB$TotalBackFSA)
+max(H2aii.PB$TotalBackFSA)
+min(H2aii.PB$TripLength)
+max(H2aii.PB$TripLength)
+```
+
+
+
+### All of the GVIF^(1/(2*Df)) are less than 3 so I think I can safely assume there is no problematic collinearity
+
+```{r H2aii PM PctJagged Dive Type Model Selection}
+
+plot(H2aii.PM$TotalHeadFSA,H2aii.PM$PctJagged)
+reg<-lm(PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass, data = H2aii.PM)
+#summary(reg)
+abline(reg, col="red")
+
+plot(H2aii.PM$DepartMass,H2aii.PM$TripLength)
+reg<-lm(TripLength ~ DepartMass, data = H2aii.PM)
+abline(reg, col="red")
+
+plot(H2aii.PM$DepartMass,H2aii.PM$PctJagged)
+reg<-lm(PctJagged ~ DepartMass, data = H2aii.PM)
+#summary(reg)
+abline(reg, col="red")
+
+plot(H2aii.PM$TripLength,H2aii.PM$PctJagged)
+reg<-lm(PctJagged ~ TripLength, data = H2aii.PM)
+#summary(reg)
+abline(reg, col="red")
+
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+m = lmer(form, data=H2aii.PM)
+vif(m)
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass 
+H2aii.PM.m <- glm(form, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+simout  <-  simulateResiduals(H2aii.PM.m, n=500)
+plot(simout) 
+
+
+form1 <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:Age
+form1a <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass+ (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:Age
+form1b <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age
+form1c <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA+ TotalHeadFSA:DepartMass
+
+H2aii.PM.m1 <- glmer(form1, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1)
+H2aii.PM.m1a <- glmer(form1a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1a)
+H2aii.PM.m1b <- glmer(form1b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1b)
+H2aii.PM.m1c <- glmer(form1c, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1c)
+anova(H2aii.PM.m1,H2aii.PM.m1a,H2aii.PM.m1b,H2aii.PM.m1c)
+
+form2 <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age
+form2a <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form2b <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age
+
+H2aii.PM.m2 <- glmer(form2, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2)
+H2aii.PM.m2a <- glmer(form2a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2a)
+H2aii.PM.m2b <- glmer(form2b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2b)
+anova(H2aii.PM.m2,H2aii.PM.m2a,H2aii.PM.m2b) #multicolinearity between Age and DepartMass is not so bad and the model with both has the better AIC
+
+form3 <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form3a <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) 
+
+H2aii.PM.m3 <- glmer(form3, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3)
+H2aii.PM.m3a <- glmer(form3a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3a)
+anova(H2aii.PM.m3,H2aii.PM.m3a)
+
+form4 <- PctJagged ~ TotalBackFSA + Age + DepartMass + (1|Year) 
+form4a <- PctJagged ~ TotalHeadFSA + Age + DepartMass + (1|Year) 
+form4b <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) 
+form4c <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year) 
+
+H2aii.PM.m4 <- glmer(form4, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4)
+H2aii.PM.m4a <- glmer(form4a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4a)
+H2aii.PM.m4b <- glmer(form4b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4b)
+H2aii.PM.m4c <- glmer(form4c, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4c)
+anova(H2aii.PM.m4,H2aii.PM.m4a,H2aii.PM.m4b,H2aii.PM.m4c)
+
+form5 <- PctJagged ~ Age + DepartMass + (1|Year) 
+form5a <- PctJagged ~ TotalHeadFSA + DepartMass + (1|Year) 
+form5b <- PctJagged ~ TotalHeadFSA + Age + (1|Year) 
+
+H2aii.PM.m5 <- glmer(form5, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m5)
+H2aii.PM.m5a <- glmer(form5a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m5a)
+H2aii.PM.m5b <- glmer(form5b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m5b)
+
+anova(H2aii.PM.m5,H2aii.PM.m5a,H2aii.PM.m5b)
+
+form6 <- PctJagged ~ TotalHeadFSA + Age + (1|Year)
+form6a <- PctJagged ~ TotalHeadFSA + (1|Year)
+form6b <- PctJagged ~ Age + (1|Year)
+
+H2aii.PM.m6 <- glmer(form6, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m6)
+H2aii.PM.m6a <- glmer(form6a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m6a)
+H2aii.PM.m6b <- glmer(form6b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m6b)
+
+anova(H2aii.PM.m6,H2aii.PM.m6a,H2aii.PM.m6b)
+
+form6 <- PctJagged ~ TotalHeadFSA + Age + (1|Year)
+H2aii.PM.m6 <- glmer(form6, family=Gamma(link=log), data=H2aii.PM)
+summary(H2aii.PM.m6)
+r2_nakagawa(H2aii.PM.m6)
+
+d.H = 0.004144/sqrt(0.001485)
+d.H
+d.A = 0.018434/sqrt(0.001485)
+d.A
+
+#> d.H = 0.004144/sqrt(0.001485)
+#> d.H
+#[1] 0.1075367
+#> d.A = 0.018434/sqrt(0.001485)
+#> d.A
+#[1] 0.4783617
+
+new.dat = H2aii.PM
+new.dat.0 = H2aii.PM
+sd(H2aii.PM$TotalHeadFSA)/mean(H2aii.PM$TotalHeadFSA)
+max(H2aii.PM$TotalHeadFSA)
+min(H2aii.PM$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2aii.PM$TotalHeadFSA)
+#new.dat$Age = max(H2aii.PM$Age)
+new.dat.0$TotalHeadFSA = min(H2aii.PM$TotalHeadFSA)
+#new.dat.0$Age = min(H2aii.PM$Age)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+#TotalHeadFSA
+pred.null<-predict(H2aii.PM.m6,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PM.m6, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+#> mean(pred)
+#[1] 0.4899343
+#> mean(pred.null)
+#[1] 0.5587184
+#> mean(pred)-mean(pred.null)
+#[1] -0.0687841
+
+new.dat = H2aii.PM
+new.dat.0 = H2aii.PM
+sd(H2aii.PM$TotalHeadFSA)/mean(H2aii.PM$TotalHeadFSA)
+max(H2aii.PM$TotalHeadFSA)
+min(H2aii.PM$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+#new.dat$TotalHeadFSA = max(H2aii.PM$TotalHeadFSA)
+new.dat$Age = max(H2aii.PM$Age)
+#new.dat.0$TotalHeadFSA = min(H2aii.PM$TotalHeadFSA)
+new.dat.0$Age = min(H2aii.PM$Age)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PM.m6,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PM.m6, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+#Age
+#> mean(pred)
+#[1] 0.6134136
+#> mean(pred.null)
+#[1] 0.5101463
+#> mean(pred)-mean(pred.null)
+#[1] 0.1032673
+```
+
+
+
+### Checked each of the model and there are no significant interactions and no multicollinearity so left all of the variables in an removed the interactions. I checked the AIC for all of the different combinations of interactions and finally again for just the models with the lowest AIC values and for where I most expected there to be interations. The model with no interactions has the lowest AIC value (H2aii.PM.m1).
+
+### Examined the residuals in a couple different ways and they all look good
+
+
+
+### Conclusion: No change in the models but the residuals are better. There is no impact on proportion of V-Shaped dives during the PB migration by frontal surface area, position, or location of tags.
+
+
+```{r PM PB split look at data}
+
+H2aii.PM=subset(H2aii.PM, SkipBreed == 1)
+H2aii.PM$Year <- as.factor(H2aii.PM$Year)
+H2aii.PB$Year <- as.factor(H2aii.PB$Year)
+H2aii.PB$MaxDist <- as.integer(H2aii.PB$MaxDist)
+H2aii.PM$MaxDist <- as.integer(H2aii.PM$MaxDist)
+H2aii.PB$TotDist <- as.integer(H2aii.PB$TotDist)
+H2aii.PM$TotDist <- as.integer(H2aii.PM$TotDist)
+
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) #+ TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA +  DepartMass:Age
+H2aii.PM.m <- lmer(form, data=H2aii.PM)
+summary(H2aii.PM.m)
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year) #+ TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + DepartMass:Age
+H2aii.PB.m <- lmer(form, data=H2aii.PB)
+summary(H2aii.PB.m)
+
+#VIF of full model no interactions of PM
+vif(H2aii.PM.m)
+
+#VIF of full model no interactions of PB
+vif(H2aii.PB.m)
+
+
+print("PM:Mean and Std Dev Proportion of Benthic Dives")
+mean(H2aii.PM$PctBenthic)
+sd(H2aii.PM$PctBenthic)
+print("PB:Mean and Std Dev Proportion of Benthic Dives")
+mean(H2aii.PB$PctBenthic)
+sd(H2aii.PB$PctBenthic)
+
+print("PM:Mean and Std Dev Total Number of Dives")
+mean(H2aii.PM$PctTransit)
+sd(H2aii.PM$PctTransit)
+print("PB:Mean and Std Dev Total Number of Dives")
+mean(H2aii.PB$PctTransit)
+sd(H2aii.PB$PctTransit)
+
+print("PM:Mean and Std Dev Proportion of Drift Dives")
+mean(H2aii.PM$PctDrift)
+sd(H2aii.PM$PctDrift)
+print("PB:Mean and Std Dev Proportion of Drift Dives")
+mean(H2aii.PB$PctDrift)
+sd(H2aii.PB$PctDrift)
+
+print("PM:Mean and Std Dev Max Distance")
+mean(H2aii.PM$MaxDist)
+sd(H2aii.PM$MaxDist)
+print("PB:Mean and Std Dev Max Distance")
+mean(H2aii.PB$MaxDist)
+sd(H2aii.PB$MaxDist)
+
+print("PM:Mean and Std Dev Total Distance")
+mean(H2aii.PM$TotDist)
+sd(H2aii.PM$TotDist)
+#H2aii.PB <- na.omit(H2aii.PB)
+print("PB:Mean and Std Dev Total Distance")
+mean(H2aii.PB$TotDist)
+sd(H2aii.PB$TotDist)
+```
+
+
+### PM: Benthic
+```{r PM additional dive type model selection}
+#Benthic
+hist(H2aii.PM$PctBenthic)
+hist(H2aii.PM$PctDrift)
+hist(H2aii.PM$PctTransit)
+hist(H2aii.PM$PctJagged)
+
+form <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+forma <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:Age
+formb <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age
+formc <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA
+
+H2aii.PM.m <- glmer(form, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+H2aii.PM.ma <- glmer(forma, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.ma)
+H2aii.PM.mb <- glmer(formb, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.mb)
+H2aii.PM.mc <- glmer(formc, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.mc)
+
+anova(H2aii.PM.m, H2aii.PM.ma, H2aii.PM.mb,H2aii.PM.mc) #multicolinearity between Age and DepartMass is not so bad and H2aii.PM.ma has the lowest AIC
+form2 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age
+form2a <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form2b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age
+
+H2aii.PM.m2 <- glmer(form2, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2)
+H2aii.PM.m2a <- glmer(form2a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.ma)
+H2aii.PM.m2b <- glmer(form2b, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m2b)
+anova(H2aii.PM.m2, H2aii.PM.m2a, H2aii.PM.m2b)
+
+form3 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form3a <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) 
+
+H2aii.PM.m3 <- glmer(form3, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m3)
+H2aii.PM.m3a <- glmer(form3a, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m3a)
+anova(H2aii.PM.m3, H2aii.PM.m3a)
+
+form4 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form4a <- PctBenthic ~ TotalHeadFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form4b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+
+H2aii.PM.m4 <- glmer(form4, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m4)  
+H2aii.PM.m4a <- glmer(form4a, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m4a)  
+H2aii.PM.m4b <- glmer(form4b, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m4b)  
+anova(H2aii.PM.m4, H2aii.PM.m4a,H2aii.PM.m4b)
+
+form5 <- PctBenthic ~ TotalHeadFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+form5a <- PctBenthic ~ TotalHeadFSA + DepartMass + (1|Year) + TotalHeadFSA:DepartMass 
+
+H2aii.PM.m5 <- glmer(form5, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m5)
+H2aii.PM.m5a <- glmer(form5a, family = Gamma(link=log),  data=H2aii.PM)
+summary(H2aii.PM.m5a)
+anova(H2aii.PM.m5, H2aii.PM.m5a)
+
+r2_nakagawa(H2aii.PM.m5a)
+
+form6 <- PctBenthic ~ TotalHeadFSA + DepartMass + TotalHeadFSA:DepartMass 
+
+H2aii.PM.m6 <- glm(form6, family = Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m6)
+
+
+new.dat = H2aii.PM
+new.dat.0 = H2aii.PM
+sd(H2aii.PM$TotalHeadFSA)/mean(H2aii.PM$TotalHeadFSA)
+max(H2aii.PM$TotalHeadFSA)
+min(H2aii.PM$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2aii.PM$TotalHeadFSA)
+#new.dat$DepartMass = max(H2aii.PM$DepartMass)
+new.dat.0$TotalHeadFSA = min(H2aii.PM$TotalHeadFSA)
+#new.dat.0$DepartMass = min(H2aii.PM$DepartMass)
+
+pred.null<-predict(H2aii.PM.m5a,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PM.m5a, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+#HFSA min depart mass
+#> mean(pred)
+#[1] 0.3810835
+#> mean(pred.null)
+#[1] 0.01761617
+#> mean(pred)-mean(pred.null)
+#[1] 0.3634673
+
+#HFSA max depart mass
+#> mean(pred)
+#[1] 0.02554524
+#> mean(pred.null)
+#[1] 0.06877069
+#> mean(pred)-mean(pred.null)
+#[1] -0.04322545
+
+#HFSA
+#> mean(pred)
+#[1] 0.09955165
+#> mean(pred.null)
+#[1] 0.03826799
+#> mean(pred)-mean(pred.null)
+#[1] 0.06128366
+
+#DM
+#> mean(pred)
+#[1] 0.05732943
+#> mean(pred.null)
+#[1] 0.04959985
+#> mean(pred)-mean(pred.null)
+#[1] 0.007729579
+
+BD_interactionHD<-plot_model(H2aii.PM.m6, type = "pred", terms = c("TotalHeadFSA", "DepartMass"))
+BD_interactionHD
+#no effect on large animals but increases with fsa for small animals
+
+```
+
+#PM: Drift
+
+```{r PM PctDrift}
+form <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+forma <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  
+formb <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + DepartMass:Age
+formc <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+
+H2aii.PM.m <- glmer(form, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m)
+H2aii.PM.ma <- glmer(forma, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.ma)
+H2aii.PM.mb <- glmer(formb, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.mb)
+H2aii.PM.mc <- glmer(formc, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.mc)
+anova(H2aii.PM.m,H2aii.PM.ma,H2aii.PM.mb,H2aii.PM.mc) #multicolinearity between Age and DepartMass is not so bad and H2aii.PM.ma has the lowest AIC
+
+form1 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  
+form1a <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass 
+form1b <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) +  TotalHeadFSA:TotalBackFSA  
+
+H2aii.PM.m1 <- glmer(form1, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m1)
+H2aii.PM.m1a <- glmer(form1a, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m1a)
+H2aii.PM.m1b <- glmer(form1b, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m1b)
+
+anova(H2aii.PM.m1,H2aii.PM.m1a,H2aii.PM.m1b)
+
+form2 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass 
+form2.1 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+form2a <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass
+form2b <- PctDrift ~ TotalHeadFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass
+
+H2aii.PM.m2.1 <- glmer(form2.1, family=Gamma(link=log),  data=H2aii.PM)
+summary(H2aii.PM.m2.1)
+H2aii.PM.m2 <- glmer(form2, family=Gamma(link=log),  data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m2a <- glmer(form2a, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m2a)
+H2aii.PM.m2b <- glmer(form2b, family=Gamma(link=log),  data=H2aii.PM)
+#summary(H2aii.PM.m2b)
+
+anova(H2aii.PM.m2,H2aii.PM.m2.1,H2aii.PM.m2a,H2aii.PM.m2b)
+r2_nakagawa(H2aii.PM.m2.1)
+
+library(r2glmm)
+r2 = r2beta(model=H2aii.PM.m2.1,partial=TRUE,method='sgv')
+r2
+
+#lmerTest::step(H2aii.PM.m, ddf = c("Satterthwaite"), alpha.fixed = 0.05,
+#  reduce.fixed = TRUE, reduce.random = FALSE)
+
+
+d.H = 4.229e-02/sqrt(0.00896)
+d.H
+d.B = 1.475e-02 /sqrt(0.00896)
+d.B
+d.A = 3.499e-02/sqrt(0.00896)
+d.A
+d.DM = 3.885e-03/sqrt(0.00896)
+d.DM
+d.HDM = 1.599e-04/sqrt(0.00896)
+d.HDM
+
+
+
+new.dat = H2aii.PM
+new.dat.0 = H2aii.PM
+sd(H2aii.PM$TotalHeadFSA)/mean(H2aii.PM$TotalHeadFSA)
+max(H2aii.PM$TotalHeadFSA)
+min(H2aii.PM$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalBackFSA = max(H2aii.PM$TotalBackFSA)
+#new.dat$TotaHeadFSA = max(H2aii.PM$TotaHeadFSA)
+#new.dat$DepartMass = max(H2aii.PM$DepartMass)
+#new.dat$Age = max(H2aii.PM$Age)
+#new.dat.0$TotalBackFSA = min(H2aii.PM$TotalBackFSA)
+new.dat.0$TotalHeadFSA = min(H2aii.PM$TotalHeadFSA)
+#new.dat.0$DepartMass = min(H2aii.PM$DepartMass)
+#new.dat.0$Age = min(H2aii.PM$Age)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PM.m2.1,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PM.m2.1, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+
+TD_interactionHD<-plot_model(H2aii.PM.m2.1, type = "pred", terms = c("TotalHeadFSA", "DepartMass"))
+TD_interactionHD
+TD_interactionBD<-plot_model(H2aii.PM.m2.1, type = "pred", terms = c("TotalBackFSA", "DepartMass"))
+TD_interactionBD
+#LMM age reduced 0.3%, depart mass 0.25%, 
+
+
+
+```
+
+###Partial residuals for PM Drift Dives
+
+```{r partial residuals for PM drift}
+form2.1 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass  + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+H2aii.PM.m2.1 <- glmer(form2.1, family=Gamma(link=log),  data=H2aii.PM)
+summary(H2aii.PM.m2.1)
+
+###Partial residuals for frontal surface area, Head
+m<- glmer(TotalHeadFSA~ TotalBackFSA + Age + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+           , family=Gamma(link=log),  data=H2aii.PM)
+m.1<-glmer(PctDrift~ TotalBackFSA + Age + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass , family=Gamma(link=log),  data=H2aii.PM)
+m.resid=residuals(m, type = "pearson")
+m.1.resid=residuals(m.1, type = "pearson")
+
+HFSA<-ggplot(augment(m), aes(x = m.resid, y = m.1.resid)) +   geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) + # smoothed residuals
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("a. Frontal Surface Area, Head")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y ="Proportion of Drift Dives (Residuals)")
+HFSA
+###Partial residuals for frontal surface area, back
+m.2<- glmer(TotalBackFSA~TotalHeadFSA + Age + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+           , family=Gamma(link=log),  data=H2aii.PM)
+m.3<-glmer(PctDrift~ TotalHeadFSA + Age + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass            , family=Gamma(link=log),  data=H2aii.PM)
+m.2.resid=residuals(m.2, type = "pearson")
+m.3.resid=residuals(m.3, type = "pearson")
+
+BFSA<-ggplot(augment(m.2), aes(x = m.2.resid, y = m.3.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("b. Frontal Surface Area, Back")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y = NULL)
+BFSA
+
+###Partial residuals for Age
+m.4<- glmer(Age ~TotalHeadFSA+ TotalBackFSA + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+           , family=Gamma(link=log),  data=H2aii.PM)
+m.5<-glmer(PctDrift~ TotalHeadFSA + TotalBackFSA +Age + DepartMass  + (1|Year)+ TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+           , family=Gamma(link=log),  data=H2aii.PM)
+m.4.resid=residuals(m.4, type = "pearson")
+m.5.resid=residuals(m.5, type = "pearson")
+
+A<-ggplot(augment(m.4), aes(x = m.4.resid, y = m.5.resid)) + 
+  geom_point(size=1) +
+  geom_smooth(method=lm, color="black", size=1) +
+  #geom_line(aes(x = .resid, y = .resid)) +
+  theme_classic() +
+  ggtitle("c. Age")+
+  theme(plot.title = element_text(size = 10))+
+  labs(x = NULL, y = NULL)
+A
+
+
+PMPD.figure<-grid.arrange(HFSA,BFSA,A, ncol = 3)
+annotate_figure(PMPD.figure,
+                bottom = "Residuals")
+summary(H2aii.PM.m2.1)
+InW=7.2; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+PMPD.figure<-grid.arrange(HFSA,BFSA,A, ncol = 3)
+annotate_figure(PMPD.figure,
+                bottom = "Residuals")
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\Partial_resid\\")  #sets working directory for where plot will be saved
+ggsave(paste("PMDPpartialResid.png", sep=''),  #save the plot and name it as you please
+       width=7.2*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+```
+
+#PM: Transit
+
+```{r pm pcttransit}
+form <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+forma <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+formb <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age
+formc <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA
+
+form <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) 
+H2aii.PM.m <- glmer(form, family=Gamma(link=log), data=H2aii.PM)
+vif(H2aii.PM.m)
+
+#Gamma?
+H2aii.PM.m <- glmer(form, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+H2aii.PM.ma <- glmer(forma,  family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.ma)
+H2aii.PM.mb <- glmer(formb, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.mb)
+H2aii.PM.mc <- glmer(formc, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.mc)
+anova(H2aii.PM.m,H2aii.PM.ma,H2aii.PM.mb,H2aii.PM.mc)
+
+form1a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age +TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+form1b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+form1c <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age +TotalHeadFSA:DepartMass
+form1d <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age+ TotalBackFSA:DepartMass 
+
+H2aii.PM.m1a <- glmer(form1a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1a)
+H2aii.PM.m1b <- glmer(form1b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1b)
+H2aii.PM.m1c <- glmer(form1c, family=Gamma(link=log), data=H2aii.PM)
+summary(H2aii.PM.m1c)
+H2aii.PM.m1d <- glmer(form1d, family=Gamma(link=log), data=H2aii.PM)
+summary(H2aii.PM.m1d)
+anova(H2aii.PM.m1a,H2aii.PM.m1b,H2aii.PM.m1c,H2aii.PM.m1d)
+
+
+form2 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age+ TotalBackFSA:DepartMass 
+form2a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + DepartMass:Age
+form2b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass 
+
+H2aii.PM.m2 <- glmer(form2, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2)
+H2aii.PM.m2a <- glmer(form2a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2a)
+H2aii.PM.m2b <- glmer(form2b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2b)
+
+anova(H2aii.PM.m2,H2aii.PM.m2a,H2aii.PM.m2b)
+
+form3 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass 
+form3a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+
+H2aii.PM.m3 <- glmer(form3, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+H2aii.PM.m3a <- glmer(form3a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+
+anova(H2aii.PM.m3,H2aii.PM.m3a)
+
+form3 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) 
+form3a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year) 
+form3b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) 
+
+H2aii.PM.m3 <- glmer(form3, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3)
+H2aii.PM.m3a <- glmer(form3a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3a)
+H2aii.PM.m3b <- glmer(form3b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3b)
+anova(H2aii.PM.m3,H2aii.PM.m3a,H2aii.PM.m3b)
+
+form4 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) 
+form4a <- PctTransit ~ TotalHeadFSA + DepartMass + (1|Year) 
+form4b <- PctTransit ~ DepartMass + TotalBackFSA + (1|Year) 
+form4c <- PctTransit ~ TotalHeadFSA + TotalBackFSA + (1|Year) 
+
+H2aii.PM.m4 <- glmer(form4, family=Gamma(link=log), 
+                    # nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), 
+                     data=H2aii.PM)
+summary(H2aii.PM.m4)
+H2aii.PM.m4a <- glmer(form4a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4a) 
+H2aii.PM.m4b <- glmer(form4b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4b)
+H2aii.PM.m4c <- glmer(form4c, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4c) 
+anova(H2aii.PM.m4,H2aii.PM.m4a,H2aii.PM.m4b,H2aii.PM.m4c)
+
+form5 <- PctTransit ~ DepartMass + TotalBackFSA + (1|Year) 
+form5a <- PctTransit ~ DepartMass +  (1|Year) 
+form5b <- PctTransit ~ TotalBackFSA + (1|Year) 
+H2aii.PM.m5 <- glmer(form5, family=Gamma(link=log), 
+                    # nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), 
+                     data=H2aii.PM)
+H2aii.PM.m5a <- glmer(form5a, family=Gamma(link=log), data=H2aii.PM)
+
+H2aii.PM.m5b <- glmer(form5b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m5b)
+anova(H2aii.PM.m5,H2aii.PM.m5a,H2aii.PM.m5b)
+
+form <- PctTransit ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA  + DepartMass:Age + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass 
+H2aii.PM.m <- glmer(form, family=Gamma(link=log), 
+                    # nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), 
+                     data=H2aii.PM)
+summary(H2aii.PM.m5) 
+r2_nakagawa(H2aii.PM.m5)
+r2 = r2beta(model=H2aii.PM.m5,partial=TRUE,method='sgv')
+r2
+
+TD_interactionHB<-plot_model(H2aii.PM.m4, type = "pred", terms = c("TotalHeadFSA", "TotalBackFSA"))
+TD_interactionHB
+
+d.H = 0.0099516/sqrt(0.01977)
+d.H
+d.B = 0.0060682/sqrt(0.01977)
+d.B
+d.DM = 0.0029554/sqrt(0.01977)
+d.DM
+d.HB = 0.0009400/sqrt(0.01977)
+d.HB
+
+new.dat = H2aii.PM
+new.dat.0 = H2aii.PM
+sd(H2aii.PM$TotalHeadFSA)/mean(H2aii.PM$TotalHeadFSA)
+max(H2aii.PM$TotalHeadFSA)
+min(H2aii.PM$DepartMass)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2aii.PM$TotalHeadFSA)
+#new.dat$DepartMass = min(H2aii.PM$DepartMass)
+new.dat$TotalBackFSA = min(H2aii.PM$TotalBackFSA)
+new.dat.0$TotalHeadFSA = min(H2aii.PM$TotalHeadFSA)
+#new.dat.0$DepartMass = max(H2aii.PM$DepartMass)
+new.dat.0$TotalBackFSA = min(H2aii.PM$TotalBackFSA)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PM.m4,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PM.m4, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+mean(H2aii.PM$PctTransit)
+sd(H2aii.PM$PctTransit)
+mean(H2aii.PM$DepartMass)
+sd(H2aii.PM$DepartMass)
+#min depart mass
+#> mean(pred)
+#[1] 0.4447577
+#> mean(pred.null)
+#[1] 0.3501434
+#> mean(pred)-mean(pred.null)
+#[1] 0.09461432
+
+#all departmasses
+#> mean(pred)
+#[1] 0.311791
+#> mean(pred.null)
+#[1] 0.281777
+#> mean(pred)-mean(pred.null)
+#[1] 0.03001394
+
+#high depart mass 
+#mean(pred)
+#[1] 0.230531
+#> mean(pred.null)
+#[1] 0.2344918
+#> mean(pred)-mean(pred.null)
+#[1] -0.003960813
+```
+
+
+### PM: PctForage Analysis (Combined jagged bottom and Benthic dives)
+
+```{r pm pctForage}
+
+form <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass 
+H2aii.PM.m <- glm(form, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+simout  <-  simulateResiduals(H2aii.PM.m, n=500)
+plot(simout) 
+
+form <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+m = lmer(form, data=H2aii.PM)
+vif(m)
+
+
+form <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+
+forma <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA 
+
+formb <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + DepartMass:Age
+
+formc <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+ 
+formd <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+
+#Gamma?
+H2aii.PM.m <- glmer(form, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m)
+H2aii.PM.ma <- glmer(forma,  family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.ma)
+H2aii.PM.mb <- glmer(formb, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.mb)
+H2aii.PM.mc <- glmer(formc, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.mc)
+H2aii.PM.md <- glmer(formd, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.md)
+anova(H2aii.PM.m,H2aii.PM.ma,H2aii.PM.mb,H2aii.PM.mc,H2aii.PM.md)
+
+form1 <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+
+form1a <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA  
+
+form1b <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass + DepartMass:Age
+
+form1c <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+
+H2aii.PM.m1 <- glmer(form1, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1)
+H2aii.PM.m1a <- glmer(form1a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1a)
+H2aii.PM.m1b <- glmer(form1b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1b)
+H2aii.PM.m1c <- glmer(form1c, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m1c)
+anova(H2aii.PM.m1,H2aii.PM.m1a,H2aii.PM.m1b,H2aii.PM.m1c)
+
+form2 <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA
+form2a <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalBackFSA:DepartMass 
+form2b <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA
+
+H2aii.PM.m2 <- glmer(form2, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2)
+H2aii.PM.m2a <- glmer(form2a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2a)
+H2aii.PM.m2b <- glmer(form2b, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m2b)
+anova(H2aii.PM.m2,H2aii.PM.m2a,H2aii.PM.m2b)
+
+form3 <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA
+form3a <- PctForage ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+
+H2aii.PM.m3 <- glmer(form3, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3)
+H2aii.PM.m3a <- glmer(form3a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m3a)
+anova(H2aii.PM.m3,H2aii.PM.m3a)
+
+form4 <- PctForage ~ TotalHeadFSA + TotalBackFSA +Age + DepartMass + (1|Year) 
+form4a <- PctForage ~ TotalHeadFSA + TotalBackFSA +Age + (1|Year)
+form4b <- PctForage ~ TotalHeadFSA + TotalBackFSA +DepartMass + (1|Year) 
+form4c <- PctForage ~ TotalHeadFSA + Age + DepartMass + (1|Year) 
+form4d <- PctForage ~ TotalBackFSA +Age + DepartMass + (1|Year) 
+ 
+
+H2aii.PM.m4 <- glmer(form4, family=Gamma(link=log),data=H2aii.PM)
+summary(H2aii.PM.m4)  
+H2aii.PM.m4a <- glmer(form4a, family=Gamma(link=log), data=H2aii.PM)
+#summary(H2aii.PM.m4a)
+H2aii.PM.m4b <- glmer(form4b, family=Gamma(link=log),data=H2aii.PM)
+H2aii.PM.m4c<- glmer(form4c, family=Gamma(link=log), data=H2aii.PM)
+H2aii.PM.m4d <- glmer(form4d, family=Gamma(link=log),data=H2aii.PM)
+
+anova(H2aii.PM.m4,H2aii.PM.m4a,H2aii.PM.m4b,H2aii.PM.m4c,H2aii.PM.m4d)
+    
+form5 <- PctForage ~ TotalBackFSA +Age + DepartMass + (1|Year) 
+form5a <- PctForage ~ TotalBackFSA +Age +  (1|Year) 
+form5b <- PctForage ~ TotalBackFSA +DepartMass + (1|Year) 
+form5c <- PctForage ~ Age + DepartMass + (1|Year) 
+
+H2aii.PM.m5 <- glmer(form5, family=Gamma(link=log),data=H2aii.PM)
+H2aii.PM.m5a <- glmer(form5a, family=Gamma(link=log), data=H2aii.PM)
+H2aii.PM.m5b <- glmer(form5b, family=Gamma(link=log),data=H2aii.PM)
+H2aii.PM.m5c<- glmer(form5c, family=Gamma(link=log), data=H2aii.PM)
+anova(H2aii.PM.m5,H2aii.PM.m5a,H2aii.PM.m5b,H2aii.PM.m5c)
+
+form6 <- PctForage ~ Age + DepartMass + (1|Year) 
+form6a <- PctForage ~ DepartMass + (1|Year) 
+form6b <- PctForage ~ Age + (1|Year) 
+
+H2aii.PM.m6 <- glmer(form6, family=Gamma(link=log),data=H2aii.PM)
+H2aii.PM.m6a <- glmer(form6a, family=Gamma(link=log), data=H2aii.PM)
+H2aii.PM.m6b <- glmer(form6b, family=Gamma(link=log),data=H2aii.PM)
+anova(H2aii.PM.m6,H2aii.PM.m6a,H2aii.PM.m6b)
+   
+summary(H2aii.PM.m6a)   
+r2_nakagawa(H2aii.PM.m6a)
+r2 = r2beta(model=H2aii.PM.m6a,partial=TRUE,method='sgv')
+r2
+
+mean(H2aii.PM$PctForage)
+sd(H2aii.PM$PctForage)
+```
+
+### PB: jagged, Benthic, drift, and transit Dives No gamma
+
+```{r H2aii PB Jagged}
+plot(H2aii.PB$TotalHeadFSA,H2aii.PB$PctJagged)
+reg<-lm(PctJagged ~ TotalHeadFSA + DepartMass * TripLength, data = H2aii.PB)
+#summary(reg)
+abline(reg, col="red")
+
+plot(H2aii.PB$DepartMass,H2aii.PB$TripLength)
+reg<-lm(TripLength ~ DepartMass, data = H2aii.PB)
+abline(reg, col="red")
+
+plot(H2aii.PB$DepartMass,H2aii.PB$PctJagged)
+reg<-lm(PctJagged ~ DepartMass, data = H2aii.PB)
+#summary(reg)
+abline(reg, col="red")
+
+plot(H2aii.PB$TripLength,H2aii.PB$PctJagged)
+reg<-lm(PctJagged ~ TripLength, data = H2aii.PB)
+#summary(reg)
+abline(reg, col="red")
+
+form <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+m = lmer(form, data=H2aii.PB)
+vif(m)
+
+forma <- PctJagged ~ TotalHeadFSA + TotalBackFSA +  DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+H2aii.PB.ma <- glm(forma, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.ma)
+simout  <-  simulateResiduals(H2aii.PB.ma, n=500)
+plot(simout) 
+
+
+#gamma
+
+form1 <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+form1a <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength
+form1b <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:TripLength
+form1c <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA 
+
+H2aii.PB.m1 <- glmer(form1, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m1) 
+H2aii.PB.m1a <- glmer(form1a, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m1a) 
+H2aii.PB.m1b <- glmer(form1b, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m1b) 
+H2aii.PB.m1c <- glmer(form1c, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m1c) 
+
+anova(H2aii.PB.m1,H2aii.PB.m1a,H2aii.PB.m1b,H2aii.PB.m1c)
+
+form2 <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:TripLength
+form2a <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass 
+form2b <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength
+form2c <- PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) 
+
+H2aii.PB.m2 <- glmer(form2, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m2) 
+H2aii.PB.m2a <- glmer(form2a, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m2a) 
+H2aii.PB.m2b <- glmer(form2b, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m2b) 
+H2aii.PB.m2c <- glmer(form2c, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m2c) 
+
+anova(H2aii.PB.m2,H2aii.PB.m2a,H2aii.PB.m2b,H2aii.PB.m2c)
+
+form3 <-  PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength
+form3a <-  PctJagged ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) 
+form3b <-  PctJagged ~ TotalHeadFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength 
+form3c <-  PctJagged ~ TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength 
+
+H2aii.PB.m3 <- glmer(form3, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m3)
+H2aii.PB.m3a <- glmer(form3a, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m3a)
+H2aii.PB.m3b <- glmer(form3b, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m3b)
+H2aii.PB.m3c <- glmer(form3c, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m3c)
+anova(H2aii.PB.m3,H2aii.PB.m3a,H2aii.PB.m3b,H2aii.PB.m3c)
+
+form4 <- PctJagged ~ TotalHeadFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength 
+form4a <- PctJagged ~ DepartMass + TripLength + (1|Year) + DepartMass:TripLength 
+
+H2aii.PB.m4 <- glmer(form4, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+#summary(H2aii.PB.m4)  
+H2aii.PB.m4a <- glmer(form4a, family=Gamma(link=log), nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=3000)), data=H2aii.PB)
+summary(H2aii.PB.m4a)  
+anova(H2aii.PB.m4,H2aii.PB.m4a)
+
+r2_nakagawa(H2aii.PB.m4)
+
+d.DM = 5.170e-03/sqrt(0.004237)
+d.DM
+d.T = 3.358e-02 /sqrt(0.004237)
+d.T
+d.DMT = 9.142e-05/sqrt(0.004237)
+d.DMT
+
+#> d.DM = 5.170e-03/sqrt(0.004237)
+#> d.DM
+#[1] 0.07942575
+#> d.T = 3.358e-02 /sqrt(0.004237)
+#> d.T
+#[1] 0.5158833
+#> d.DMT = 9.142e-05/sqrt(0.004237)
+#> d.DMT
+#[1] 0.001404468
+
+new.dat = H2aii.PB
+new.dat.0 = H2aii.PB
+mean(new.dat$TotalHeadFSA)
+sd(new.dat$TotalHeadFSA)
+mean(new.dat$PctJagged)
+sd(new.dat$PctJagged)
+new.dat$TotalHeadFSA = new.dat$TotalHeadFSA+sd(new.dat$TotalHeadFSA)
+new.dat.0$TotalHeadFSA =  H2aii.PB$TotalHeadFSA
+#new.dat$TotalBackFSA = new.dat$TotalBackFSA*2
+#new.dat.0$TotalBackFSA = new.dat$TotalBackFSA
+
+pred.null<-predict(H2aii.PB.m4a, newdata=new.dat.0 ,type = "response")
+pred.JD<-predict(H2aii.PB.m4a, newdata=new.dat ,type = "response")
+mean(pred.JD)-mean(pred.null)
+
+```
+
+```{r PB additional dive type model selection}
+#Benthic
+hist(H2aii.PB$PctBenthic)
+hist(H2aii.PB$PctDrift)
+hist(H2aii.PB$PctTransit)
+hist(H2aii.PB$PctJagged)
+
+form <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)
+m = lmer(form, data=H2aii.PB)
+vif(m)
+hist(resid(m))
+qqnorm(resid(m))
+qqline(resid(m))
+
+form1 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + DepartMass:Age
+form1a <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+form1b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+form1b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + DepartMass:TripLength + DepartMass:Age
+form1c <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + DepartMass:Age
+
+H2aii.PB.m1 <- glmer(form1,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1)
+H2aii.PB.m1a <- glmer(form1a,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1a)
+H2aii.PB.m1b <- glmer(form1b,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1b)
+H2aii.PB.m1c <- glmer(form1c,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1c)
+anova(H2aii.PB.m1,H2aii.PB.m1a,H2aii.PB.m1b,H2aii.PB.m1c) #multicolinearity between Age and DepartMass is not so bad and the model with both has the better AIC
+
+form2 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+form2a <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA
+form2b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + DepartMass:Age
+form2c <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:TotalBackFSA  + DepartMass:Age
+
+H2aii.PB.m2 <- glmer(form2,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2)
+H2aii.PB.m2a <- glmer(form2a,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2a)
+H2aii.PB.m2b <- glmer(form2b,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2b)
+H2aii.PB.m2c <- glmer(form2c,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2c)
+anova(H2aii.PB.m2,H2aii.PB.m2a,H2aii.PB.m2b,H2aii.PB.m2c)
+
+form3 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass + DepartMass:Age
+form3a <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ DepartMass:Age
+form3b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+
+H2aii.PB.m3 <- glmer(form3,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3)
+H2aii.PB.m3a <- glmer(form3a,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3a)
+H2aii.PB.m3b <- glmer(form3b,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3b)
+anova(H2aii.PB.m3,H2aii.PB.m3a,H2aii.PB.m3b)
+
+form4 <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+form4a <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)+ TotalHeadFSA:DepartMass
+form4b <- PctBenthic ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+form4c <- PctBenthic ~ TotalHeadFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+
+H2aii.PB.m4 <- glmer(form4,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4)
+H2aii.PB.m4a <- glmer(form4a,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4a)
+H2aii.PB.m4b <- glmer(form4b,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4b)
+H2aii.PB.m4c <- glmer(form4c,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4c)
+anova(H2aii.PB.m4,H2aii.PB.m4a,H2aii.PB.m4b,H2aii.PB.m4c)
+
+
+form5 <- PctBenthic ~ TotalHeadFSA + Age + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+form5a <- PctBenthic ~ TotalHeadFSA + Age + DepartMass + (1|Year)+ TotalHeadFSA:DepartMass
+form5b <- PctBenthic ~ TotalHeadFSA + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+
+H2aii.PB.m5 <- glmer(form5,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5)
+H2aii.PB.m5a <- glmer(form5a,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5a)
+H2aii.PB.m5b <- glmer(form5b,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5b)
+anova(H2aii.PB.m5,H2aii.PB.m5a,H2aii.PB.m5b)
+      
+      
+form6 <- PctBenthic ~ TotalHeadFSA + DepartMass + TripLength + (1|Year)+ TotalHeadFSA:DepartMass
+form6a <- PctBenthic ~ TotalHeadFSA + DepartMass + (1|Year)+ TotalHeadFSA:DepartMass
+
+H2aii.PB.m6 <- glmer(form6,  family=Gamma(link=log), data=H2aii.PB)
+summary(H2aii.PB.m6)
+H2aii.PB.m6a <- glmer(form6a,  family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m6a)
+anova(H2aii.PB.m6,H2aii.PB.m6a)
+
+r2_nakagawa(H2aii.PB.m6)
+form6r <- PctBenthic ~ TotalHeadFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass
+H2aii.PB.m6r <- glm(form6r,  family=Gamma(link=log), data=H2aii.PB)
+summary(H2aii.PB.m6r)
+simout  <-  simulateResiduals(H2aii.PB.m6r, n=500)
+plot(simout)
+
+d.H = 7.541e-02/sqrt(0.3193)
+d.H
+d.DM = 4.108e-03/sqrt(0.3193)
+d.DM
+d.TL = 1.168e-02/sqrt(0.3193)
+d.TL
+d.HDM = 2.107e-04/sqrt(0.3193)
+d.HDM
+
+#> d.H = 7.541e-02/sqrt(0.3193)
+#> d.H
+#[1] 0.1334534
+#> d.DM = 4.108e-03/sqrt(0.3193)
+#> d.DM
+#[1] 0.007269942
+#> d.TL = 1.168e-02/sqrt(0.3193)
+#> d.TL
+#[1] 0.02067014
+#> d.HDM = 2.107e-04/sqrt(0.3193)
+#> d.HDM
+#[1] 0.0003728766
+
+new.dat = H2aii.PB
+new.dat.0 = H2aii.PB
+sd(H2aii.PB$TotalHeadFSA)/mean(H2aii.PB$TotalHeadFSA)
+max(H2aii.PB$TotalHeadFSA)
+min(H2aii.PB$DepartMass)
+#new.dat$TotalHeadFSA = H2aii.PB$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+#new.dat$TotalHeadFSA = max(H2aii.PB$TotalHeadFSA)
+new.dat$DepartMass = max(H2aii.PB$DepartMass)
+#new.dat$TripLength = min(H2aii.PB$TripLength)
+#new.dat.0$TotalHeadFSA = min(H2aii.PB$TotalHeadFSA)
+new.dat.0$DepartMass = min(H2aii.PB$DepartMass)
+#new.dat.0$TripLength = min(H2aii.PB$TripLength)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PB.m6,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PB.m6, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+HD_interactionHD<-plot_model(H2aii.PB.m6, type = "pred", terms = c("TotalHeadFSA", "DepartMass"))
+HD_interactionHD
+BD_interactionHD<-plot_model(H2aii.PB.m6, type = "pred", terms = c("TotalHeadFSA", "DepartMass"))
+BD_interactionHD
+
+pred.null<-predict(H2aii.PB.m5,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PB.m5, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+```
+
+
+
+```{r pctdrift pb}
+#Drift
+
+form <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+m = lmer(form, data=H2aii.PB)
+vif(m)
+
+forma <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength
+H2aii.PB.ma <- glm(forma, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.ma)
+simout  <-  simulateResiduals(H2aii.PB.ma, n=500)
+plot(simout) 
+
+
+form1 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + (1|Year)
+form1a <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + (1|Year)
+form1b <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + DepartMass:TripLength + (1|Year)
+form1c <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + (1|Year)
+
+H2aii.PB.m1 <- glmer(form1,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),  data=H2aii.PB)
+#summary(H2aii.PB.m1)
+H2aii.PB.m1a <- glmer(form1a,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m1a)
+H2aii.PB.m1b <- glmer(form1b,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m1b)
+H2aii.PB.m1c <- glmer(form1c,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m1c)
+anova(H2aii.PB.m1,H2aii.PB.m1a,H2aii.PB.m1b,H2aii.PB.m1c) 
+
+form2 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + (1|Year)
+form2a <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year)
+form2b <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:TotalBackFSA + (1|Year)
+form2c <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+
+H2aii.PB.m2 <- glmer(form2,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m2)
+H2aii.PB.m2a <- glmer(form2a,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m2a)
+H2aii.PB.m2b <- glmer(form2b,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m2b)
+H2aii.PB.m2c <- glmer(form2c,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m2c)
+anova(H2aii.PB.m2,H2aii.PB.m2a,H2aii.PB.m2b,H2aii.PB.m2c)
+
+form3 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+form3a <- PctDrift ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year)
+form3b <- PctDrift ~ TotalHeadFSA + TotalBackFSA + TripLength + (1|Year)
+form3c <- PctDrift ~ TotalBackFSA + DepartMass + TripLength + (1|Year)
+form3d <- PctDrift ~ TotalHeadFSA + DepartMass + TripLength + (1|Year)
+
+H2aii.PB.m3 <- glmer(form3,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m3)
+H2aii.PB.m3a <- glmer(form3a,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m3a)
+H2aii.PB.m3b <- glmer(form3b,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m3b)
+H2aii.PB.m3c <- glmer(form3c,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m3c)
+H2aii.PB.m3d <- glmer(form3d,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)), data=H2aii.PB)
+#summary(H2aii.PB.m3d)
+anova(H2aii.PB.m3,H2aii.PB.m3a,H2aii.PB.m3b,H2aii.PB.m3c,H2aii.PB.m3d)
+
+form4 <- PctDrift ~ TotalHeadFSA + TotalBackFSA + TripLength + (1|Year)
+form4a <- PctDrift ~ TotalBackFSA + TripLength + (1|Year)
+form4b <- PctDrift ~ TotalHeadFSA + TripLength + (1|Year)
+form4c <- PctDrift ~ TotalHeadFSA + TotalBackFSA + (1|Year)
+
+H2aii.PB.m4 <- glmer(form4,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),  data=H2aii.PB)
+#summary(H2aii.PB.m4)
+H2aii.PB.m4a <- glmer(form4a,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),   data=H2aii.PB)
+#summary(H2aii.PB.m4a)
+H2aii.PB.m4b <- glmer(form4b,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),   data=H2aii.PB)
+#summary(H2aii.PB.m4b)
+H2aii.PB.m4c <- glmer(form4c,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),   data=H2aii.PB)
+#summary(H2aii.PB.m4c)
+anova(H2aii.PB.m4,H2aii.PB.m4a,H2aii.PB.m4b,H2aii.PB.m4c) 
+
+form5 <- PctDrift ~ TotalHeadFSA + TripLength + (1|Year)
+form5a <- PctDrift ~ TripLength + (1|Year)
+form5b <- PctDrift ~ TotalHeadFSA + (1|Year)
+
+H2aii.PB.m5 <- glmer(form5,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),  data=H2aii.PB)
+#summary(H2aii.PB.m5)
+H2aii.PB.m5a <- glmer(form5a,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),  data=H2aii.PB)
+summary(H2aii.PB.m5a)
+H2aii.PB.m5b <- glmer(form5b,  family=Gamma(link=log), nAGQ=0, control = glmerControl(optCtrl=list(maxfun=5000)),  data=H2aii.PB)
+#summary(H2aii.PB.m5b)
+anova(H2aii.PB.m5,H2aii.PB.m5a,H2aii.PB.m5b)
+
+r2_nakagawa(H2aii.PB.m5a)
+
+
+
+d.A = 0.0457663/sqrt(0.002213 )
+d.A
+d.DM = 0.0013747/sqrt(0.002213 )
+d.DM
+d.TL = 0.0045140/sqrt(0.002213 )
+d.TL
+
+new.dat = H2aii.PB
+new.dat.0 = H2aii.PB
+sd(H2aii.PB$TotalHeadFSA)/mean(H2aii.PB$TotalHeadFSA)
+max(H2aii.PB$TotalHeadFSA)
+min(H2aii.PB$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PB$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2aii.PB$TotalHeadFSA)
+#new.dat$DepartMass = max(H2aii.PB$DepartMass)
+new.dat.0$TotalHeadFSA = min(H2aii.PB$TotalHeadFSA)
+#new.dat.0$DepartMass = max(H2aii.PB$DepartMass)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PB.m5a,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PB.m5a, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+```
+
+
+```{r PB pcttransit}
+#Transit
+form <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+m = lmer(form, data=H2aii.PB)
+vif(m)
+
+forma <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+
+H2aii.PB.ma <- glm(forma, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.ma)
+simout  <-  simulateResiduals(H2aii.PB.ma, n=500)
+plot(simout) 
+
+
+form1 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + DepartMass:Age
+form1a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+form1b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:Age
+form1c <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + DepartMass:TripLength + DepartMass:Age
+form1d <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + DepartMass:Age
+
+H2aii.PB.m1 <- glmer(form1, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1)
+H2aii.PB.m1a <- glmer(form1a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1a)
+H2aii.PB.m1b <- glmer(form1b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1b)
+H2aii.PB.m1c <- glmer(form1c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1c)
+H2aii.PB.m1d <- glmer(form1d, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1d)
+anova(H2aii.PB.m1,H2aii.PB.m1a,H2aii.PB.m1b,H2aii.PB.m1c,H2aii.PB.m1d)
+
+form2 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+form2a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + TotalHeadFSA:TotalBackFSA 
+form2b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + DepartMass:TripLength 
+form2c <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+
+H2aii.PB.m2 <- glmer(form2, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2)
+H2aii.PB.m2a <- glmer(form2a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2a)
+H2aii.PB.m2b <- glmer(form2b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2b)
+H2aii.PB.m2c <- glmer(form2c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2c)
+anova(H2aii.PB.m2,H2aii.PB.m2a,H2aii.PB.m2b,H2aii.PB.m2c)
+
+form3 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) + DepartMass:TripLength
+form3a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + (1|Year) 
+form3b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength
+form3c <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+
+H2aii.PB.m3 <- glmer(form3, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3)
+H2aii.PB.m3a <- glmer(form3a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3a)
+H2aii.PB.m3b <- glmer(form3b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3b)
+H2aii.PB.m3c <- glmer(form3c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3c)
+anova(H2aii.PB.m3,H2aii.PB.m3a,H2aii.PB.m3b,H2aii.PB.m3c)
+      
+form4 <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+form4a <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year)
+form4b <- PctTransit ~ TotalHeadFSA + TotalBackFSA + TripLength + (1|Year)
+form4c <- PctTransit ~ TotalHeadFSA + DepartMass + TripLength + (1|Year)
+form4d <- PctTransit ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+
+H2aii.PB.m4 <- glmer(form4, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4)
+H2aii.PB.m4a <- glmer(form4a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4a)
+H2aii.PB.m4b <- glmer(form4b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4b)
+H2aii.PB.m4c <- glmer(form4c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4c)
+H2aii.PB.m4d <- glmer(form4d, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m4d)
+anova(H2aii.PB.m4,H2aii.PB.m4a,H2aii.PB.m4b,H2aii.PB.m4c,H2aii.PB.m4d)
+
+form5 <- PctTransit ~ TotalHeadFSA + DepartMass + TripLength + (1|Year)
+form5a <- PctTransit ~ TotalHeadFSA + DepartMass + (1|Year)
+form5b <- PctTransit ~ TotalHeadFSA + TripLength + (1|Year)
+form5c <- PctTransit ~ DepartMass + TripLength + (1|Year)
+
+H2aii.PB.m5 <- glmer(form5, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5)
+H2aii.PB.m5a <- glmer(form5a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5a)
+H2aii.PB.m5b <- glmer(form5b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5b)
+H2aii.PB.m5c <- glmer(form5c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m5c)
+anova(H2aii.PB.m5,H2aii.PB.m5a,H2aii.PB.m5b,H2aii.PB.m5c)
+
+form6 <- PctTransit ~ DepartMass + TripLength + (1|Year)
+form6a <- PctTransit ~ DepartMass + (1|Year)
+form6b <- PctTransit ~ TripLength + (1|Year)
+H2aii.PB.m6 <- glmer(form6, family=Gamma(link=log), data=H2aii.PB)
+summary(H2aii.PB.m6)
+H2aii.PB.m6a <- glmer(form6a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m6a)
+H2aii.PB.m6b <- glmer(form6b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m6b)
+anova(H2aii.PB.m6,H2aii.PB.m6a,H2aii.PB.m6b)
+
+r2_nakagawa(H2aii.PB.m6)
+r2 = r2beta(model=H2aii.PB.m6,partial=TRUE,method='sgv')
+r2
+d.DM = 0.0017043/sqrt(0.02164   )
+d.DM
+d.TL = 0.0116092/sqrt(0.02164   )
+d.TL
+
+
+new.dat = H2aii.PB
+new.dat.0 = H2aii.PB
+sd(H2aii.PB$TotalHeadFSA)/mean(H2aii.PB$TotalHeadFSA)
+max(H2aii.PB$TotalHeadFSA)
+min(H2aii.PB$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2aii.PB$TotalHeadFSA)
+#new.dat$TripLength = max(H2aii.PB$TripLength)
+new.dat$DepartMass = min(H2aii.PB$DepartMass)
+new.dat.0$TotalHeadFSA = min(H2aii.PB$TotalHeadFSA)
+#new.dat.0$TripLength = max(H2aii.PB$TripLength)
+new.dat.0$DepartMass = min(H2aii.PB$DepartMass)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PB.m6,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PB.m6, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+
+```
+
+
+### PB: PctForage Analysis (Combined Vshaped and Benthic dives)
+
+```{r PB pctForage}
+#Forage
+form <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + Age + TripLength + (1|Year)
+m = lmer(form, data=H2aii.PB)
+vif(m)
+
+form <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+m = lmer(form, data=H2aii.PB)
+vif(m)
+
+forma <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength 
+
+H2aii.PB.ma <- glm(forma, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.ma)
+simout  <-  simulateResiduals(H2aii.PB.ma, n=500)
+plot(simout) 
+
+
+form1 <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass
+
+form1a <-PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + TotalBackFSA:DepartMass 
+
+form1b <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:TripLength + TotalHeadFSA:DepartMass
+
+form1c <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass
+
+form1d <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass
+
+H2aii.PB.m1 <- glmer(form1, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1)
+H2aii.PB.m1a <- glmer(form1a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1a)
+H2aii.PB.m1b <- glmer(form1b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1b)
+H2aii.PB.m1c <- glmer(form1c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1c)
+H2aii.PB.m1d <- glmer(form1d, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m1d)
+anova(H2aii.PB.m1,H2aii.PB.m1a,H2aii.PB.m1b,H2aii.PB.m1c,H2aii.PB.m1d)
+
+form2 <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass
+form2a <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalBackFSA:DepartMass 
+form2b <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength +  TotalHeadFSA:DepartMass 
+form2c <-  PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalBackFSA:DepartMass + TotalHeadFSA:DepartMass
+
+H2aii.PB.m2 <- glmer(form2, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2)
+H2aii.PB.m2a <- glmer(form2a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2a)
+H2aii.PB.m2b <- glmer(form2b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2b)
+H2aii.PB.m2c <- glmer(form2c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m2c)
+anova(H2aii.PB.m2,H2aii.PB.m2a,H2aii.PB.m2b,H2aii.PB.m2c)
+
+form3 <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength + TotalHeadFSA:DepartMass
+form3a <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + TotalHeadFSA:DepartMass 
+form3b <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year) + DepartMass:TripLength
+form3c <- PctForage ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+
+H2aii.PB.m3 <- glmer(form3, family=Gamma(link=log), data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m3a <- glmer(form3a, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3a)
+H2aii.PB.m3b <- glmer(form3b, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3b)
+H2aii.PB.m3c <- glmer(form3c, family=Gamma(link=log), data=H2aii.PB)
+#summary(H2aii.PB.m3c)
+anova(H2aii.PB.m3,H2aii.PB.m3a,H2aii.PB.m3b,H2aii.PB.m3c)
+
+
+r2_nakagawa(H2aii.PB.m3)
+r2 = r2beta(model=H2aii.PB.m3,partial=TRUE,method='sgv')
+r2
+d.DM = 0.0017043/sqrt(0.02164   )
+d.DM
+d.TL = 0.0116092/sqrt(0.02164   )
+d.TL
+
+
+new.dat = H2aii.PB
+new.dat.0 = H2aii.PB
+sd(H2aii.PB$TotalHeadFSA)/mean(H2aii.PB$TotalHeadFSA)
+max(H2aii.PB$TotalHeadFSA)
+min(H2aii.PB$TotalHeadFSA)
+#new.dat$TotalHeadFSA = H2aii.PM$TotalHeadFSA
+#new.dat.0$TotalHeadFSA = 0
+new.dat$TotalHeadFSA = max(H2aii.PB$TotalHeadFSA)
+#new.dat$TripLength = max(H2aii.PB$TripLength)
+new.dat$DepartMass = min(H2aii.PB$DepartMass)
+new.dat.0$TotalHeadFSA = min(H2aii.PB$TotalHeadFSA)
+#new.dat.0$TripLength = max(H2aii.PB$TripLength)
+new.dat.0$DepartMass = min(H2aii.PB$DepartMass)
+#y=mx+b y is CalcMassGain, m is estimate, x is the frontal surface area of the head tags, b is the y-intercept (mass gain of untagged animals or closest to it)
+
+pred.null<-predict(H2aii.PB.m6,newdata=new.dat.0 ,type = "response", interval="confidence")
+pred<-predict(H2aii.PB.m6, newdata=new.dat ,type = "response", interval="confidence")
+mean(pred)
+mean(pred.null)
+mean(pred)-mean(pred.null)
+
+
+```
+### Graphs
+```{r H2aii Dive Type Data Visualization}
+H2aii.PM$FSATotal = H2aii.PM$TotalHeadFSA+H2aii.PM$TotalBackFSA
+H2aii.PB$FSATotal = H2aii.PB$TotalHeadFSA+H2aii.PB$TotalBackFSA
+
+H2aii.PM$NumVShape = H2aii.PM$NumDives*H2aii.PM$PctJagged
+H2aii.PB$NumVShape = H2aii.PB$NumDives*H2aii.PB$PctJagged
+H2aii.PM$NumTransit = H2aii.PM$NumDives*H2aii.PM$PctTransit
+H2aii.PB$NumTransit = H2aii.PB$NumDives*H2aii.PB$PctTransit
+
+H2aii.PM.FF <- ggplot(data = H2aii.PM, aes(x=FSATotal, y=PctJagged)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Jagged-Bottom", 
+                     limits = c(0, 1.0), breaks = seq(0,1.0, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.FF
+
+
+H2aii.PM.HB <- ggplot(data = H2aii.PM, aes(y=TotalHeadFSA, x=TotalBackFSA)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(bquote('Frontal Surface Area, Head '(cm^2))
+                     #, 
+                     #limits = c(0, 1.0), breaks = seq(0,1.0, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area, Back '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  #ggtitle("a. PM: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.HB
+
+H2aii.PB.FF <- ggplot(data = H2aii.PB, aes(x=FSATotal, y=PctJagged)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Jagged-Bottom", 
+                     limits = c(0, 1.0), breaks = seq(0,1.0, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.FF
+
+H2aii.PM.TF <- ggplot(data = H2aii.PM, aes(x=FSATotal, y=PctTransit)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: V-shaped", 
+                     limits = c(0, 1.0), breaks = seq(0,1.0, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("c.")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.TF
+
+H2aii.PB.TF <- ggplot(data = H2aii.PB, aes(x=FSATotal, y=PctTransit)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: V-shaped", 
+                     limits = c(0, 1.0), breaks = seq(0,1.0, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("d. PB: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.TF
+```
+
+
+
+
+
+```{r H2aii Dive Type Data Visualization}
+H2aii.PB.DF <- ggplot(data = H2aii.PB, aes(x=FSATotal, y=PctDrift*100)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion (%) of Dives: Drift", 
+                     limits = c(0, 60), breaks = seq(0,60, by=10)
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("PB")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.DF
+```
+
+```{r H2aii Dive Type Data Visualization}
+
+H2aii.PM$FSATotal=H2aii.PM$TotalHeadFSA+H2aii.PM$TotalBackFSA
+H2aii.PM.DF <- ggplot(data = H2aii.PM, aes(x=FSATotal, y=PctDrift*100)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion (%) of Dives: Drift", 
+                     limits = c(0, 60), breaks = seq(0,60, by=10)) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Total Frontal Surface Area '(cm^2)))+
+                     #,limits = c(8, 40), breaks = seq(8,40, by=10)) 
+                     
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("PM")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.DF
+```
+
+```{r H2aii Dive Type Data Visualization}
+H2aii.PM.BF <- ggplot(data = H2aii.PM, aes(x=TotalHeadFSA, y=PctBenthic*100)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion (%) of Dives: Benthic", 
+                     limits = c(0, 60), breaks = seq(0,60, by=10)) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Head-mounted Frontal Surface Area '(cm^2)),
+                     limits = c(8, 40), breaks = seq(8,40, by=10)) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("PM")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.BF
+
+H2aii.PB.BF <- ggplot(data = H2aii.PB, aes(x=TotalHeadFSA, y=PctBenthic*100)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion (%) of Dives: Benthic", 
+                     limits = c(0, 60), breaks = seq(0,60, by=10)) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Head-mounted Frontal Surface Area '(cm^2)),
+                     limits = c(8, 40), breaks = seq(8,40, by=10)) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("PB")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.BF
+```
+
+
+```{r H2aii Dive Type Data Visualization}
+InW=3; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2aii.PM.DF
+          #,labels="auto", ncol = 2, nrow = 2
+          )
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2aii.PctDDTFSA.pub.png", sep=''),  #save the plot and name it as you please
+       width=3*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+```
+
+
+```{r H2aii TL Data Visualization}
+
+H2aii.PM$FSATotal=H2aii.PM$TotalHeadFSA+H2aii.PM$TotalBackFSA
+H2aii.PB.TL <- ggplot(data = H2aii.PM, aes(x=FSATotal, y=TripLength)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Trip Length (days)", 
+                     #limits = c(0, 0.6), breaks = seq(0,0.6, by=0.1)
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  #ggtitle("PB: Head-Mounted Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.TL
+
+InW=3; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+H2aii.PB.TL
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2aii.TripLength.pub.png", sep=''),  #save the plot and name it as you please
+       width=3*2.54, height=3*2.54, units='cm')
+```
+
+
+```{r H2aii Dive Type Data Visualization}
+H2aii.PM.ND <- ggplot(data = H2aii.PM, aes(x=FSATotal, y=NumDives)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Number of Dives per Trip", 
+                     #breaks = as.numeric(c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.ND
+
+H2aii.PB.ND <- ggplot(data = H2aii.PB, aes(x=FSATotal, y=NumDives)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Number of Dives per Trip", 
+                     #breaks = as.numeric(c(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8))
+  ) +
+  stat_poly_line(color="black", size = 2) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.ND
+
+
+InW=7.5; InH=4 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2aii.PM.ND, H2aii.PB.ND, nrow= 1, ncol= 2)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("PM.PB.ND.png", sep=''),  #save the plot and name it as you please
+       width=7.5*2.54, height=4*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+
+H2aii.PM.For <- ggplot(data = H2aii.PM, aes(x=NumDives/TripLength, y=PctJagged)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Jagged Dives", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Dives per Day") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM Jagged Dives")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PM.For
+H2aii.PB.For <- ggplot(data = H2aii.PB, aes(x=NumDives/TripLength, y=PctJagged)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Jagged Dives", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Dives per Day") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB Jagged Dives")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PB.For
+
+H2aii.PM.Tra <- ggplot(data = H2aii.PM, aes(x=NumDives/TripLength, y=PctTransit)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Transit", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Dives per Day") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("c. PM Transit Dives")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PM.Tra
+
+H2aii.PB.Tra <- ggplot(data = H2aii.PB, aes(x=NumDives/TripLength, y=PctTransit)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Transit", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Dives per Day") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("d. PB Transit Dives")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PB.Tra
+
+
+InW=5; InH=6 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2aii.PM.For,H2aii.PB.For,
+          H2aii.PM.Tra,H2aii.PB.Tra, ncol = 2, nrow = 3)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2aii.DiveType.DivespDay.pub.png", sep=''),  #save the plot and name it as you please
+       width=5*2.54, height=6*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+ggarrange(H2aii.PM.For,H2aii.PM.Tra,
+          H2aii.PB.For,H2aii.PB.Tra, ncol = 2, nrow = 3)
+
+
+H2aii.PM.DiveTrip <- ggplot(data = H2aii.PM, aes(x=TotDist, y=NumDives, color=FSATotal)) + 
+  geom_point(size = 2) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  scale_color_gradientn(colors = c("darkred", "red", "orange", "yellow", "green", "blue")) +
+  theme_classic() +
+  scale_y_continuous(name = "Number of Dives per Day", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Total Distance travelled") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("PM")+
+  theme(plot.title = element_text(size = 9, color = "black"))
+H2aii.PM.DiveTrip
+
+
+
+H2aii.PM.sattag <- ggplot(data = H2aii.PM, aes(y=PctTransit, x=reorder(SatTagType, PctTransit))) + 
+  geom_boxplot() +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_x_discrete(name = "SRDL Type", 
+                     #breaks = as.Pcteric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_y_continuous(name="Proportion of Transit Dives") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: Proportion of Transit Dives by SRDL Type")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.sattag
+
+
+H2aii.PB.sattag <- ggplot(data = H2aii.PB, aes(y=PctTransit, x=reorder(SatTagType, PctTransit))) + 
+  geom_boxplot() +
+  #geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_x_discrete(name = "SRDL Type", 
+                     #breaks = as.Pcteric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_y_continuous(name="Proportion of Transit Dives") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: Proportion of Transit Dives by SRDL Type")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.sattag
+
+InW=6; InH=3 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain Proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the Proportions to achieve the settings you want.
+ggarrange(H2aii.PM.sattag,
+          H2aii.PB.sattag, 
+          ncol = 2, nrow = 1)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("H2aii.PctTD.sattag.pub.png", sep=''),  #save the plot and name it as you please
+       width=6*2.54, height=3*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+
+```
+
+
+
+
+# Day and Night
+
+```{r pct day and night}
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\TaggingEffectsData\\outfiles")
+data.tag.dt.sol <- read.csv("data.tag.dt.sol.csv")
+data.tag.dt.sol$TotalHeadFSA <- data.tag.dt.sol$TotalHeadFSA*0.01
+data.tag.dt.sol$TotalBackFSA <- data.tag.dt.sol$TotalBackFSA*0.01
+data.tag.dt.sol$FSATotal <- data.tag.dt.sol$FSATotal*0.01
+
+PB<-data.tag.dt.sol %>% filter(Season == "PB")
+PM<-data.tag.dt.sol %>% filter(Season == "PM")
+PM=subset(PM, SkipBreed == 1)
+#For Stats: Split data.tag into PM and PB 
+H2aii.PM = PM %>% dplyr::select(c("TOPPID", "Year", "Age", "DepartMass", "TripLength", "CalcMassGain", "MassGainRate", "NumDives", 
+                           "TotalHeadFSA", "TotalBackFSA", "SkipBreed", "PctJagged", "PctDrift", "PctBenthic", "PctTransit", "TotDist", "MaxDist", "SatTagType"
+                           , "PctDay", "PctNight", "PctCrep"
+                           ))
+H2aii.PB = PB %>% dplyr::select(c("TOPPID", "Year", "Age", "DepartMass", "TripLength", "CalcMassGain", "MassGainRate", "NumDives", 
+                           "TotalHeadFSA", "TotalBackFSA", "PctJagged", "PctDrift", "PctBenthic", "PctTransit", "TotDist", "MaxDist", "SatTagType"
+                           , "PctDay", "PctNight", "PctCrep"
+                           ))
+H2aii.PB<-H2aii.PB[!(H2aii.PB$TOPPID=="2006024"),]
+H2aii.PM=subset(H2aii.PM, SkipBreed == 1)
+H2aii.PM$Year <- as.factor(H2aii.PM$Year)
+H2aii.PB$Year <- as.factor(H2aii.PB$Year)
+H2aii.PB$MaxDist <- as.integer(H2aii.PB$MaxDist)
+H2aii.PM$MaxDist <- as.integer(H2aii.PM$MaxDist)
+H2aii.PB$TotDist <- as.integer(H2aii.PB$TotDist)
+H2aii.PM$TotDist <- as.integer(H2aii.PM$TotDist)
+H2aii.PB$TripLength <- as.integer(H2aii.PB$TripLength)
+H2aii.PB$Age <- as.integer(H2aii.PB$Age)
+H2aii.PB$DepartMass <- as.integer(H2aii.PB$DepartMass)
+
+H2aii.PB<-H2aii.PB[!(H2aii.PB$TOPPID=="2020002"),]
+H2aii.PB<-H2aii.PB[!(H2aii.PB$TOPPID=="2020012"),]
+H2aii.PB<-H2aii.PB[!(H2aii.PB$TOPPID=="2019006"),]
+H2aii.PB<-H2aii.PB[!(H2aii.PB$TOPPID=="2013010"),]
+
+H2aii.PM<-H2aii.PM[!(H2aii.PM$TOPPID=="2006046"),]
+H2aii.PM<-H2aii.PM[!(H2aii.PM$TOPPID=="2004033"),]
+H2aii.PM<-H2aii.PM[!(H2aii.PM$TOPPID=="2004034"),]
+H2aii.PM<-H2aii.PM[!(H2aii.PM$TOPPID=="2018031"),]
+
+#Day PM
+
+form1 <- PctDay ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year) +
+TotalHeadFSA:Age            
+form2 <- PctDay ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year)
+form3 <- PctDay ~ TotalHeadFSA + DepartMass + (1|Year) 
+form4 <- PctDay ~ TotalHeadFSA + DepartMass + (1|Year) +
+TotalHeadFSA:DepartMass            
+
+form1 <- PctDay ~ TotalHeadFSA + Age + (1|Year) +
+TotalHeadFSA:Age     
+
+H2aii.PM.m1 <- glmer(form1, family="binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m2 <- glmer(form2, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m3 <- glmer(form3, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m4 <- glmer(form4, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m4)  
+
+H2aii.PM.m1 <- lmer(form1, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m2 <- lmer(form2, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m3 <- lmer(form3, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m4 <- lmer(form4, data=H2aii.PM)
+summary(H2aii.PM.m4)  
+
+#Day PB
+form1 <- PctDay ~ TotalHeadFSA + TotalBackFSA + Age + TripLength + (1|Year)
+form2 <- PctDay ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+form3 <- PctDay ~ TotalHeadFSA + TotalBackFSA + DepartMass+ TripLength + (1|Year) + DepartMass:TripLength 
+form4 <- PctDay ~ TotalHeadFSA + DepartMass+ TripLength + (1|Year) +
+TotalHeadFSA:DepartMass + DepartMass:TripLength            
+
+
+H2aii.PB.m1 <- glmer(form1, family="binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m2 <- glmer(form2, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m2)
+H2aii.PB.m3 <- glmer(form3, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m4 <- glmer(form4, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m4)  
+
+form4 <- PctDay ~ TotalBackFSA + DepartMass+ TripLength + (1|Year) 
+
+H2aii.PB.m1 <- lmer(form1, data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m2 <- lmer(form2, data=H2aii.PB)
+summary(H2aii.PB.m2)
+H2aii.PB.m3 <- lmer(form3, data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m4 <- lmer(form4, data=H2aii.PB)
+summary(H2aii.PB.m4) 
+
+#Night PM
+form1 <- PctNight ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year)#+
+#TotalHeadFSA:Age            
+form2 <- PctNight ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year)
+form3 <- PctNight ~ TotalHeadFSA + DepartMass + (1|Year) 
+form4 <- PctNight ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) +
+TotalHeadFSA:DepartMass            
+
+
+H2aii.PM.m1 <- glmer(form1, family="binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m2 <- glmer(form2, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m3 <- glmer(form3, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m4 <- glmer(form4, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m4)  
+
+H2aii.PM.m1 <- lmer(form1, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m2 <- lmer(form2, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m3 <- lmer(form3, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m4 <- lmer(form4, data=H2aii.PM)
+summary(H2aii.PM.m4) 
+
+#Night PB
+form1 <- PctNight ~ TotalHeadFSA + TotalBackFSA + Age + TripLength + (1|Year) +
+TotalBackFSA:Age + TripLength:Age           
+form2 <- PctNight ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+form3 <- PctNight ~ TotalHeadFSA + TotalBackFSA + DepartMass+ TripLength + (1|Year) +
+DepartMass:TripLength            
+form4 <- PctNight ~ TotalHeadFSA + TotalBackFSA + DepartMass+ TripLength + (1|Year) 
+
+
+H2aii.PB.m1 <- glmer(form1, family="binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m2 <- glmer(form2, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m2)
+H2aii.PB.m3 <- glmer(form3, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m4 <- glmer(form4, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m4)  
+
+form2 <- PctNight ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+form3 <- PctNight ~ TotalHeadFSA + DepartMass+ TripLength + (1|Year) 
+form4 <- PctNight ~ TotalHeadFSA + DepartMass+ TripLength + (1|Year) +
+TotalHeadFSA:DepartMass + DepartMass:TripLength   
+
+H2aii.PB.m1 <- lmer(form1, data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m2 <- lmer(form2, data=H2aii.PB)
+summary(H2aii.PB.m2)
+H2aii.PB.m3 <- lmer(form3, data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m4 <- lmer(form4, data=H2aii.PB)
+summary(H2aii.PB.m4) 
+
+
+#Crepuscular PM
+form1 <- PctCrep ~ TotalHeadFSA + Age + (1|Year) +
+TotalHeadFSA:Age
+form2 <- PctCrep ~ TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) +
+TotalHeadFSA:DepartMass
+form3 <- PctCrep ~ TotalHeadFSA + DepartMass + (1|Year) 
+form4 <- PctCrep ~ TotalHeadFSA + DepartMass + (1|Year) +
+TotalHeadFSA:DepartMass            
+
+
+H2aii.PM.m1 <- glmer(form1, family="binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m2 <- glmer(form2, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m3 <- glmer(form3, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m4 <- glmer(form4, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PM)
+summary(H2aii.PM.m4)  
+
+form1 <- PctCrep ~ TotalHeadFSA + Age + (1|Year) #+
+#TotalHeadFSA:Age + TotalBackFSA:Age
+form2 <- PctCrep ~ TotalHeadFSA  + DepartMass + (1|Year) #+
+#TotalHeadFSA:DepartMass + TotalBackFSA:DepartMass
+
+H2aii.PM.m1 <- lmer(form1, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m2 <- lmer(form2, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m3 <- lmer(form3, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m4 <- lmer(form4, data=H2aii.PM)
+summary(H2aii.PM.m4) 
+
+#Crepuscular PB
+form1 <- PctCrep ~ TotalHeadFSA + TotalBackFSA + Age + TripLength + (1|Year)
+form2 <- PctCrep ~ TotalHeadFSA + TotalBackFSA + DepartMass + TripLength + (1|Year)
+form3 <- PctCrep ~ TotalHeadFSA + Age + TripLength + (1|Year) +
+Age:TripLength         
+form4 <- PctCrep ~ TotalHeadFSA + DepartMass + TripLength + (1|Year) +
+DepartMass:TripLength          
+
+
+H2aii.PB.m1 <- glmer(form1, family="binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m2 <- glmer(form2, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m2)
+H2aii.PB.m3 <- glmer(form3, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m4 <- glmer(form4, family = "binomial", weights=NumDives, nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m4)  
+
+H2aii.PB.m1 <- lmer(form1, data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m2 <- lmer(form2, data=H2aii.PB)
+summary(H2aii.PB.m2)
+H2aii.PB.m3 <- lmer(form3, data=H2aii.PB)
+summary(H2aii.PB.m3)
+H2aii.PB.m4 <- lmer(form4, data=H2aii.PB)
+summary(H2aii.PB.m4) 
+
+```
+
+### Plotting Day, Night, Crep Dives
+```{r day night viz}
+
+H2aii.PM$FSATotal = H2aii.PM$TotalHeadFSA+H2aii.PM$TotalBackFSA
+H2aii.PB$FSATotal = H2aii.PB$TotalHeadFSA+H2aii.PB$TotalBackFSA
+
+H2aii.PM.Day <- ggplot(data = H2aii.PM, aes(x=TotalBackFSA, y=PctDay)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Day", 
+                    breaks = as.numeric(c(0.4,0.425,0.45,0.475,0.5,0.525))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Back Frontal Surface Area (cm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("a. PM: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.Day
+
+H2aii.PB.Day <- ggplot(data = H2aii.PB, aes(x=FSATotal, y=PctDay)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Day", 
+                    # breaks = as.numeric(c(0.1,0.2,0.3,0.4,0.45,0.5,0.55,0.5,0.6,0.7,0.8))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("b. PB: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.Day
+
+H2aii.PM.Night <- ggplot(data = H2aii.PM, aes(x=TotalBackFSA, y=PctNight)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Night", 
+                     breaks = as.numeric(c(0.4,0.425,0.45,0.475,0.5,0.525,0.55))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Back Frontal Surface Area (cm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("c. PM: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.Night
+
+H2aii.PB.Night <- ggplot(data = H2aii.PB, aes(x=FSATotal, y=PctNight)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Night", 
+                    # breaks = as.numeric(c(0.1,0.2,0.3,0.4,0.45,0.5,0.55,0.5,0.6,0.7,0.8))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(bquote('Frontal Surface Area '(cm^2))) +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("d. PB: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.Night
+
+H2aii.PM.C <- ggplot(data = H2aii.PM, aes(x=TotalHeadFSA, y=PctCrep)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Crepuscular", 
+                    # breaks = as.numeric(c(0.025,0.05,0.075,0.1,0.15,0.2,0.3,0.4,0.5,0.6,0.7,0.8))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Head Frontal Surface Area (cm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("e. PM: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PM.C
+
+H2aii.PB.C <- ggplot(data = H2aii.PB, aes(x=TotalHeadFSA, y=PctCrep)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Proportion of Dives: Crepuscular", 
+                    # breaks = as.numeric(c(0.025,0.05,0.075,0.1,0.15,0.2,0.3,0.4,0.5,0.6,0.7,0.8))
+  ) +
+  stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Head Frontal Surface Area (cm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 8)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +
+  ggtitle("f. PB: All Biologgers")+
+  theme(plot.title = element_text(size = 8, color = "black"))
+H2aii.PB.C
+
+InW=5; InH=6 #inches high=, inches wide=  this sets the width and height of the graph in inches. The image can still be adjusted and maintain proportions.
+windows(wid=InW, hei=InH)  #this uses above to establish window size parameters and opens the external window to be used
+par(mai=c(0.80, 0.85, 0.5, 0.15) , mgp = c(2.5,1,0)) #this sets the graphing window parameters. You can play around with the numbers to achieve the settings you want.
+ggarrange(H2aii.PM.Day,H2aii.PB.Day,H2aii.PM.Night,H2aii.PB.Night,H2aii.PM.C, H2aii.PB.C, nrow= 3, ncol= 2)
+#calls plot to put in the external window
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\ThesisDraft\\Figure\\")  #sets working directory for where plot will be saved
+ggsave(paste("PM.PB.day.night.crep.estimates.png", sep=''),  #save the plot and name it as you please
+       width=5*2.54, height=6*2.54, units='cm')  #same width and height parameters previously established but in cm units. Don't ask me why, just do it. :laughing:
+
+
+```
+
+### PM: Max and total distance models
+```{r PM max dist and tot dist models}
+##### Max Distance
+form1 <- MaxDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + (1|Year)
+H2aii.PM.m1 <- glmer(form1, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PM)
+summary(H2aii.PM.m1)
+
+form2 <- MaxDist ~ scale(TotalHeadFSA) * scale(TotalBackFSA) * scale(Age) * scale(DepartMass) + (1|Year)
+H2aii.PM.m2 <- glmer(form2, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PM)
+summary(H2aii.PM.m2)
+
+form3 <- MaxDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + (1|Year) +
+scale(TotalHeadFSA):scale(TotalBackFSA) +
+scale(TotalHeadFSA):scale(Age) +
+scale(TotalBackFSA):scale(Age) +
+scale(TotalHeadFSA):scale(DepartMass) +
+scale(TotalBackFSA):scale(DepartMass) +
+scale(Age):scale(DepartMass) +
+#scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age) +  
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(DepartMass) +
+scale(TotalHeadFSA):scale(Age):scale(DepartMass) +
+scale(TotalBackFSA):scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(DepartMass) 
+H2aii.PM.m3 <- glmer(form3, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PM)
+summary(H2aii.PM.m3)
+
+AIC(H2aii.PM.m1,H2aii.PM.m2,H2aii.PM.m3)
+
+
+##### Total Distance
+form1 <- TotDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + (1|Year)
+H2aii.PM.m1 <- glmer(form1, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PM)
+summary(H2aii.PM.m1)
+
+form2 <- TotDist ~ scale(TotalHeadFSA) * scale(TotalBackFSA) * scale(Age) * scale(DepartMass) + (1|Year)
+H2aii.PM.m2 <- glmer(form2, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PM)
+summary(H2aii.PM.m2)
+
+form3 <- TotDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + (1|Year) +
+scale(TotalHeadFSA):scale(TotalBackFSA) +   
+scale(TotalHeadFSA):scale(Age) +
+scale(TotalBackFSA):scale(Age) +
+scale(TotalHeadFSA):scale(DepartMass) +
+scale(TotalBackFSA):scale(DepartMass) +
+scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age) +
+#scale(TotalHeadFSA):scale(TotalBackFSA):scale(DepartMass) +
+scale(TotalHeadFSA):scale(Age):scale(DepartMass) +
+scale(TotalBackFSA):scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(DepartMass)
+H2aii.PM.m3 <- glmer(form3, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PM)
+summary(H2aii.PM.m3)
+
+AIC(H2aii.PM.m1,H2aii.PM.m2,H2aii.PM.m3)
+summary(H2aii.PM.m3)
+
+```
+
+
+
+### PB: Max and total distance models
+```{r PB max dist and tot dist models}
+
+###### Max Distance
+form1 <- MaxDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + scale(TripLength) + (1|Year)
+H2aii.PB.m1 <- glmer(form1, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m1)
+
+form2 <- MaxDist ~ scale(TotalHeadFSA) * scale(TotalBackFSA) * scale(Age) * scale(DepartMass) * scale(TripLength) + (1|Year)
+H2aii.PB.m2 <- glmer(form2, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m2)
+
+form3 <- MaxDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + scale(TripLength) + (1|Year) +
+scale(TotalHeadFSA):scale(TotalBackFSA) +
+scale(TotalHeadFSA):scale(Age) +
+#scale(TotalBackFSA):scale(Age) + 
+scale(TotalHeadFSA):scale(DepartMass) +
+#scale(TotalBackFSA):scale(DepartMass) +
+scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TripLength) +
+#scale(TotalBackFSA):scale(TripLength) +
+scale(Age):scale(TripLength) +
+#scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(DepartMass) +
+#scale(TotalHeadFSA):scale(Age):scale(DepartMass) +
+scale(TotalBackFSA):scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(TripLength) +
+scale(TotalHeadFSA):scale(Age):scale(TripLength) +
+scale(TotalBackFSA):scale(Age):scale(TripLength) +
+scale(TotalHeadFSA):scale(DepartMass):scale(TripLength) +
+scale(TotalBackFSA):scale(DepartMass):scale(TripLength) +
+scale(Age):scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(Age):scale(DepartMass):scale(TripLength) +
+#scale(TotalBackFSA):scale(Age):scale(DepartMass):scale(TripLength) +    
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(DepartMass):scale(TripLength)
+H2aii.PB.m3 <- glmer(form3, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, 
+                      data=H2aii.PB)
+summary(H2aii.PB.m3)
+
+AIC(H2aii.PB.m1,H2aii.PB.m2,H2aii.PB.m3)
+
+
+###### Total Distance
+form1 <- TotDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + scale(TripLength) + (1|Year)
+H2aii.PB.m1 <- glmer(form1, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m1)
+
+form2 <- TotDist ~ scale(TotalHeadFSA) * scale(TotalBackFSA) * scale(Age) * scale(DepartMass) * scale(TripLength)  + (1|Year)
+H2aii.PB.m2 <- glmer(form2, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m2)
+
+form3 <- TotDist ~ scale(TotalHeadFSA) + scale(TotalBackFSA) + scale(Age) + scale(DepartMass) + scale(TripLength) + (1|Year) +
+scale(TotalHeadFSA):scale(TotalBackFSA) +
+scale(TotalHeadFSA):scale(Age) +
+scale(TotalBackFSA):scale(Age) +
+scale(TotalHeadFSA):scale(DepartMass) +
+scale(TotalBackFSA):scale(DepartMass) +
+scale(Age):scale(DepartMass) + 
+scale(TotalHeadFSA):scale(TripLength) +
+#scale(TotalBackFSA):scale(TripLength) +
+scale(Age):scale(TripLength) +
+scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(DepartMass) +
+scale(TotalHeadFSA):scale(Age):scale(DepartMass) +
+scale(TotalBackFSA):scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(TripLength) +
+scale(TotalHeadFSA):scale(Age):scale(TripLength) +
+scale(TotalBackFSA):scale(Age):scale(TripLength) +
+scale(TotalHeadFSA):scale(DepartMass):scale(TripLength) +
+scale(TotalBackFSA):scale(DepartMass):scale(TripLength) +
+scale(Age):scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(DepartMass) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(Age):scale(DepartMass):scale(TripLength) +
+#scale(TotalBackFSA):scale(Age):scale(DepartMass):scale(TripLength) +
+scale(TotalHeadFSA):scale(TotalBackFSA):scale(Age):scale(DepartMass):scale(TripLength)  
+H2aii.PB.m3 <- glmer(form3, family = "poisson", 
+                      #weight = NumDives, 
+                      nAGQ = 0, data=H2aii.PB)
+summary(H2aii.PB.m3)
+
+AIC(H2aii.PB.m1,H2aii.PB.m2,H2aii.PB.m3)
+
+
+```
+
+#### Number of Dives Stat Models, Both migrations
+
+```{r num dive models}
+
+print("PM:Mean and Std Dev Number of Dives")
+mean(H2aii.PM$NumDives)
+sd(H2aii.PM$NumDives)
+print("PB:Mean and Std Dev Number of Dives")
+mean(H2aii.PB$NumDives)
+sd(H2aii.PB$NumDives)
+
+
+```
+
+#### Number of Dives model selection
+
+```{r num dive model select}
+H2aii.PM<-H2aii.PM[!(H2aii.PM$TOPPID=="2007041"),]
+hist(H2aii.PM$NumDives)
+form <- NumDives ~TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year)
+H2aii.PM.m <- lmer(form, data=H2aii.PM)
+summary(H2aii.PM.m)
+vif(H2aii.PM.m)
+
+form1 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass
+H2aii.PM.m1 <- lm(form1, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m1)
+
+form2 <- NumDives ~TotalHeadFSA + TotalBackFSA + Age 
+H2aii.PM.m2 <- lm(form2, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m2)
+AIC(H2aii.PM.m,H2aii.PM.m1,H2aii.PM.m2)
+
+qqnorm(residuals(H2aii.PM.m))
+qqline(residuals(H2aii.PM.m))
+
+
+form1 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + DepartMass:Age + (1|Year)
+form1a <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + DepartMass:Age + (1|Year)
+form1b <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:DepartMass + DepartMass:Age + (1|Year)
+form1c <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + (1|Year)
+
+H2aii.PM.m1 <- lmer(form1, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m1)
+H2aii.PM.m1a <- lmer(form1a, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m1a)
+H2aii.PM.m1b <- lmer(form1b, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m1b)
+H2aii.PM.m1c <- lmer(form1c, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m1c)
+anova(H2aii.PM.m1,H2aii.PM.m1a,H2aii.PM.m1b,H2aii.PM.m1c)
+
+form2 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + DepartMass:Age + (1|Year)
+form2a <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + (1|Year)
+form2b <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + DepartMass:Age + (1|Year)
+
+H2aii.PM.m2 <- lmer(form2, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m2)
+H2aii.PM.m2a <- lmer(form2a, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m2a)
+H2aii.PM.m2b <- lmer(form2b, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m2b)
+anova(H2aii.PM.m2,H2aii.PM.m2a,H2aii.PM.m2b)
+   
+form3 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + TotalHeadFSA:TotalBackFSA + (1|Year)
+form3a <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Year)   
+
+H2aii.PM.m3 <- lmer(form3, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m3)
+H2aii.PM.m3a <- lmer(form3a, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m3a)
+anova(H2aii.PM.m3,H2aii.PM.m3a)
+
+form4 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + Age + (1|Year) 
+form4a <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + (1|Year) 
+form4b <- NumDives ~TotalHeadFSA + TotalBackFSA + Age + (1|Year) 
+form4c <- NumDives ~TotalHeadFSA + DepartMass + Age + (1|Year) 
+form4d <- NumDives ~TotalBackFSA + DepartMass + Age + (1|Year) 
+
+H2aii.PM.m4 <- lmer(form4, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m4)
+H2aii.PM.m4a <- lmer(form4a, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m4a)
+H2aii.PM.m4b <- lmer(form4b, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m4b)
+H2aii.PM.m4c <- lmer(form4c, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m4c)
+H2aii.PM.m4d <- lmer(form4d, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m4d)
+anova(H2aii.PM.m4,H2aii.PM.m4a,H2aii.PM.m4b,H2aii.PM.m4c,H2aii.PM.m4d)
+
+form5 <- NumDives ~TotalBackFSA + DepartMass + Age + (1|Year)
+form5a <- NumDives ~TotalBackFSA + DepartMass+ (1|Year)
+form5b <- NumDives ~TotalBackFSA + Age + (1|Year)
+form5c <- NumDives ~DepartMass + Age + (1|Year)
+
+H2aii.PM.m5 <- lmer(form5, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m5)
+H2aii.PM.m5a <- lmer(form5a, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m5a)
+H2aii.PM.m5b <- lmer(form5b, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m5b)
+H2aii.PM.m5c <- lmer(form5c, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m5c)
+anova(H2aii.PM.m5,H2aii.PM.m5a,H2aii.PM.m5b,H2aii.PM.m5c)
+
+form6 <- NumDives ~TotalBackFSA + DepartMass+ (1|Year)
+form6a <- NumDives ~TotalBackFSA + (1|Year)
+form6b <- NumDives ~DepartMass+ (1|Year)
+
+H2aii.PM.m6 <- lmer(form6, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m6)
+H2aii.PM.m6a <- lmer(form6a, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m6a)
+H2aii.PM.m6b <- lmer(form6b, REML=FALSE, data=H2aii.PM)
+summary(H2aii.PM.m6b)
+anova(H2aii.PM.m6,H2aii.PM.m6a,H2aii.PM.m6b)
+H2aii.PM.m6 <- lmer(form6, data=H2aii.PM)
+summary(H2aii.PM.m6)
+
+r2_nakagawa(H2aii.PM.m6)
+PMNDPartR2<-partR2(H2aii.PM.m6, partvars = c("TotalBackFSA", "DepartMass"), 
+                  R2_type = "marginal", nboot = 10)
+PMNDPartR2
+#H2aii.PB.m7
+hist(resid(H2aii.PM.m6b))
+
+qqnorm(residuals(H2aii.PM.m6b))
+qqline(residuals(H2aii.PM.m6b))
+
+
+
+###PB
+hist(H2aii.PB$NumDives)
+form <- NumDives ~TotalHeadFSA + TotalBackFSA + Age + DepartMass + TripLength + (1|Year) 
+H2aii.PB.m <- lmer(form, REML=FALSE, data=H2aii.PB)
+summary(H2aii.PB.m)
+vif(H2aii.PB.m)
+
+form1 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA + TripLength:DepartMass
+form1a <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TotalHeadFSA:DepartMass + TotalHeadFSA:TotalBackFSA 
+form1b <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TotalHeadFSA:DepartMass + TripLength:DepartMass 
+form1c <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TotalHeadFSA:TotalBackFSA + TripLength:DepartMass 
+
+H2aii.PB.m1 <- lmer(form1, REML=FALSE,data=H2aii.PB)
+summary(H2aii.PB.m1)
+H2aii.PB.m1a <- lmer(form1a, REML=FALSE,data=H2aii.PB)
+summary(H2aii.PB.m1a)
+H2aii.PB.m1b <- lmer(form1b, REML=FALSE,data=H2aii.PB)
+summary(H2aii.PB.m1b)
+H2aii.PB.m1c <- lmer(form1c, REML=FALSE,data=H2aii.PB)
+summary(H2aii.PB.m1c)
+
+anova(H2aii.PB.m1,H2aii.PB.m1a,H2aii.PB.m1b,H2aii.PB.m1c)
+
+form2 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TotalHeadFSA:DepartMass + TripLength:DepartMass 
+form2a <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TotalHeadFSA:DepartMass 
+form2b <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TripLength:DepartMass 
+form2c <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year)
+
+H2aii.PB.m2 <- lmer(form2, REML=FALSE,data=H2aii.PB)
+H2aii.PB.m2a <- lmer(form2a, REML=FALSE,data=H2aii.PB)
+H2aii.PB.m2b <- lmer(form2b, REML=FALSE,data=H2aii.PB)
+H2aii.PB.m2c <- lmer(form2c, REML=FALSE,data=H2aii.PB)
+
+anova(H2aii.PB.m2,H2aii.PB.m2a,H2aii.PB.m2b,H2aii.PB.m2c)
+
+form3 <- NumDives ~TotalHeadFSA + TotalBackFSA + DepartMass + TripLength +(1|Year) + TripLength:DepartMass 
+form3a <- NumDives ~TotalHeadFSA + DepartMass + TripLength +(1|Year) + TripLength:DepartMass 
+form3b <- NumDives ~TotalBackFSA + DepartMass + TripLength +(1|Year) + TripLength:DepartMass 
+form3c <- NumDives ~DepartMass + TripLength +(1|Year) + TripLength:DepartMass 
+
+H2aii.PB.m3 <- lmer(form3, REML=FALSE,data=H2aii.PB)
+H2aii.PB.m3a <- lmer(form3a, REML=FALSE,data=H2aii.PB)
+H2aii.PB.m3b <- lmer(form3b, REML=FALSE,data=H2aii.PB)
+H2aii.PB.m3c <- lmer(form3c, REML=FALSE,data=H2aii.PB)
+anova(H2aii.PB.m3,H2aii.PB.m3a,H2aii.PB.m3b,H2aii.PB.m3c)
+
+
+H2aii.PB.m3c <- lmer(form3c, data=H2aii.PB)
+summary(H2aii.PB.m3c)
+
+r2_nakagawa(H2aii.PB.m3c)
+PBNDPartR2<-partR2(H2aii.PB.m3c, partvars = c("TripLength", "DepartMass", "TripLength:DepartMass"), 
+                  R2_type = "marginal", nboot = 10)
+PBNDPartR2
+#H2aii.PB.m7
+hist(resid(H2aii.PB.m4c))
+
+qqnorm(residuals(H2aii.PB.m4c))
+qqline(residuals(H2aii.PB.m4c))
+
+
+```
+
+
+

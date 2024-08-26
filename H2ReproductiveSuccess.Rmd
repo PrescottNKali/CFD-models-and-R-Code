@@ -1,0 +1,517 @@
+---
+title: "H2ReproductiveSuccess"
+author: "Kali Prescott"
+date: "2023-06-14"
+output: html_document
+---
+
+```{r packages}
+
+library(car)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(xtable)
+library(lubridate)
+library(data.table)
+library(corrplot)
+library(pscl)
+library(countreg)
+library(brglm2)
+library(detectseparation)
+library(lme4)
+library(glmmTMB)
+```
+
+
+```{r load data}
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\TaggingEffectsData\\outfiles")
+data.tag.rs <- read.csv("data.tag.fs.csv")
+
+data.tag.rs$TotalHeadFSA <- data.tag.rs$TotalHeadFSA*0.01
+data.tag.rs$TotalBackFSA <- data.tag.rs$TotalBackFSA*0.01
+data.tag.rs$FSATotal <- data.tag.rs$FSATotal*0.01
+
+PB<-data.tag.rs %>% filter(Season == "PB")
+PM<-data.tag.rs %>% filter(Season == "PM")
+PM$p0 <- ifelse(PM$PupMass == "0", '0', '1')
+```
+## Hurdle Model to Examine the likelihood a Pup was born and if Yes how much the pup weighed relative to the drag proxy associated with Mom.
+
+### Hurdle Model
+#### E = expected value
+#### E[y|x] = 1−𝑓1(0|𝑥)1−𝑓2(0|𝑥)∗ μ2(𝑥)
+### Binary Logistic Regression
+#### (f1): Y = p0
+#### X = dPROX
+#### Z = MDEP, Ag, and Yr
+### Truncated Poisson or Negative Binomial
+#### (f2): Y = pM
+#### X = dPROX
+#### Z = pAg, MDEP, Ag, Yr
+#### I'm adding MassGainRate to this Model
+
+#### hurdle(formula,data, subset, na.action, weights, offset,
+####   dist = c("poisson", "negbin", "geometric"),
+####   zero.dist = c("binomial", "poisson", "negbin", "geometric"),
+####   link = c("logit", "probit", "cloglog", "cauchit", "log"),
+####   control = hurdle.control(...),
+####   model = TRUE, y = TRUE, x = FALSE, ...)
+### Example
+#### install.packages("pscl")
+#### library(pscl)
+#### mod.hurdle <- hurdle(visits ~ ., data = nmes)
+##### same as this:
+#### mod.hurdle <- hurdle(visits ~ ., data = nmes, dist = "poisson", 
+####                           zero.dist = "binomial")
+#### summary(mod.hurdle)
+
+
+```{r hurdle}
+setwd("C:\\Users\\User\\Documents\\01_College\\MLMLMasters\\Thesis\\TaggingEffectsData\\ArchiveData_OldVersion\\PupMassData")
+pAge.df = read.csv("PupAge.csv")
+#pAge.df = pAge.df %>% select(c("TOPPID","PupAge"))
+
+H2c.hurdle.PM = PM %>% dplyr::select(c("TOPPID","Year", "Age", "DepartMass","CalcMassGain", "TripLength", "MassGainRate", "TotalHeadFSA", "TotalBackFSA", "PupMass", "FSATotal", "SkipBreed"))
+H2c.hurdle.PM = merge(H2c.hurdle.PM, pAge.df, by = "TOPPID", all = FALSE)
+H2c.hurdle.PM<-H2c.hurdle.PM[!(H2c.hurdle.PM$Year=="2004"),]
+#H2c.hurdle.PM<-H2c.hurdle.PM[!(H2c.hurdle.PM$Year=="2010"),]
+H2c.hurdle.PM$Year = as.factor(H2c.hurdle.PM$Year)
+H2c.hurdle.PM$PupMass = as.integer(H2c.hurdle.PM$PupMass)
+H2c.hurdle.PM = H2c.hurdle.PM %>% dplyr::select(c("Year", "Age", 
+                                           "DepartMass", "CalcMassGain", "TripLength",
+                                           "MassGainRate", "FSATotal", "TotalHeadFSA", "TotalBackFSA", "PupMass", "PupAge", "SkipBreed"))
+H2c.hurdle.PM$PupAge[H2c.hurdle.PM$PupMass == 0] <- 0 
+
+plot(table(H2c.hurdle.PM$PupMass))
+H2c.hurdle.PM=H2c.hurdle.PM[!is.na(H2c.hurdle.PM$PupMass),]
+H2c.hurdle.PM=H2c.hurdle.PM[!is.na(H2c.hurdle.PM$PupAge),]
+mean(H2c.hurdle.PM$PupAge)
+sd(H2c.hurdle.PM$PupAge)
+H2c.PM.FSA <- ggplot(data = H2c.hurdle.PM, aes(x=FSATotal, y=PupMass)) + 
+  geom_point(size = 1) +
+  geom_smooth(method=lm, color="black", size = 1) +
+  #scale_fill_manual(values=fillPalette) +
+  #scale_color_manual(values=colPalette) +
+  theme_classic() +
+  scale_y_continuous(name = "Pup Mass (Kg)", 
+                     #breaks = as.numeric(c(0,5,10,15,20,25,30,35,40,45,50,55,60))
+  ) +
+  #stat_poly_line(color="black", size = 1) +
+  #stat_poly_eq(use_label(c("adj.R2", "f", "p")), size = 3) +
+  #ylim(0,60000)+
+  scale_x_continuous(name="Frontal Surface Area (mm2)") +
+  theme(axis.title.y = element_text(color = "black", size = 9)) +
+  theme(axis.text.y = element_text(color = "black", size = 8)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, color = "black", size = 8)) +
+  theme(axis.title.x = element_text(color = "black", size = 9)) +
+  theme(legend.position="right") +
+  theme(legend.title = element_blank()) +  
+  ggtitle("Pup Mass by Frontal Surface Area of all Devices")+
+  theme(plot.title = element_text(size = 9, color = "red"))
+H2c.PM.FSA
+
+skip <-H2c.hurdle.PM %>% filter(PupMass == 0)
+noskip <-H2c.hurdle.PM %>% filter(PupMass > 0)
+
+mean(skip$MassGainRate)
+mean(noskip$MassGainRate)
+H2c.hurdle.PM <- na.omit(H2c.hurdle.PM)
+mean(H2c.hurdle.PM$PupMass)
+sd(H2c.hurdle.PM$PupMass)
+mean(H2c.hurdle.PM$PupAge)
+sd(H2c.hurdle.PM$PupAge)
+```
+
+```{r model selection of hurdle}
+
+form1 <- PupMass ~ FSATotal + Age + DepartMass + MassGainRate + PupAge + (1|Year)
+form2 <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year)  
+H2c.hurdle.PM.m1 = hurdle(form1,
+                         data = H2c.hurdle.PM, 
+                         dist = "poisson", #This is specifying poisson for the non-zero values
+                         zero.dist = "binomial") #This is specifying binomial for the zero values.
+summary(H2c.hurdle.PM.m1)
+H2c.hurdle.PM.m2 = hurdle(form2,
+                         data = H2c.hurdle.PM, 
+                         dist = "poisson", #This is specifying poisson for the non-zero values
+                         zero.dist = "binomial") #This is specifying binomial for the zero values.
+summary(H2c.hurdle.PM.m2)
+
+```
+
+#### After running the hurdle model it looks there is complete separation in the logistic regression portion of the model. I'm going to try and break up the hurdle model into two separate analyses. I tried combining the drag proxies because vif showed correlation for the logistic regression but this did not fix the separation so trying a bias-reduction instead per the link below
+
+#### https://stats.stackexchange.com/questions/400893/handling-quasi-perfect-separation-in-a-zero-inflated-negative-binomial-regressio
+
+```{r hurdle part 2 binom with bias reduction}
+H2c.hurdle.PM$SkipBreed = as.factor(H2c.hurdle.PM$SkipBreed)
+#H2c.hurdle.PM$TotalHeadFSA <- scale(H2c.hurdle.PM$TotalHeadFSA)
+#H2c.hurdle.PM$TotalBackFSA <- scale(H2c.hurdle.PM$TotalBackFSA)
+#H2c.hurdle.PM$FSATotal <- scale(H2c.hurdle.PM$FSATotal)
+#H2c.hurdle.PM$Age <- scale(H2c.hurdle.PM$Age)
+#H2c.hurdle.PM$DepartMass <- scale(H2c.hurdle.PM$DepartMass)
+#H2c.hurdle.PM$MassGainRate <- scale(H2c.hurdle.PM$MassGainRate)
+#H2c.hurdle.PM$PupAge <- scale(H2c.hurdle.PM$PupAge)
+#H2c.hurdle.PM$Year <- H2c.hurdle.PM$Year
+#H2c.hurdle.PM$PupMass <- H2c.hurdle.PM$PupMass
+
+form <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year)
+H2c.PM.m <- lmer(form, data=H2c.hurdle.PM)
+vif(H2c.PM.m)
+
+form1 <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:MassGainRate + TotalHeadFSA:DepartMass + DepartMass:Age
+form1a <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass + DepartMass:Age
+form1b <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + DepartMass:Age
+form1c <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:MassGainRate + DepartMass:Age
+form1d <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:MassGainRate + TotalHeadFSA:DepartMass
+
+H2c.hurdle.PM.m1 = glmer(form1, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m1a = glmer(form1a, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m1b = glmer(form1b, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m1c = glmer(form1c, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m1d = glmer(form1d, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+anova(H2c.hurdle.PM.m1,H2c.hurdle.PM.m1a,H2c.hurdle.PM.m1b,H2c.hurdle.PM.m1c,H2c.hurdle.PM.m1d)
+
+form2 <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass + DepartMass:Age
+form2a <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass  
+form2b <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + DepartMass:MassGainRate + DepartMass:Age
+form2c <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age  
+  
+  
+H2c.hurdle.PM.m2 = glmer(form2, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m2a = glmer(form2a, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m2b = glmer(form2b, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m2c = glmer(form2c, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+anova(H2c.hurdle.PM.m2,H2c.hurdle.PM.m2a,H2c.hurdle.PM.m2b,H2c.hurdle.PM.m2c)
+
+form3 <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass 
+form3a <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + DepartMass:MassGainRate 
+form3b <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) + TotalHeadFSA:DepartMass 
+form3c <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) 
+
+H2c.hurdle.PM.m3 = glmer(form3, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m3a = glmer(form3a, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m3b = glmer(form3b, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m3c = glmer(form3c, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+anova(H2c.hurdle.PM.m3,H2c.hurdle.PM.m3a,H2c.hurdle.PM.m3b,H2c.hurdle.PM.m3c)
+
+form4 <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) 
+form4a <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + (1|Year) 
+form4b <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + MassGainRate + (1|Year) 
+form4c <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + DepartMass + MassGainRate + (1|Year) 
+form4d <- factor(PupMass > 0) ~ TotalHeadFSA + Age + DepartMass + MassGainRate + (1|Year) 
+form4e <- factor(PupMass > 0) ~ TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year) 
+
+H2c.hurdle.PM.m4 = glmer(form4, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m4a = glmer(form4a, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m4b = glmer(form4b, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m4c = glmer(form4c, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m4d = glmer(form4d, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m4e = glmer(form4e, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+anova(H2c.hurdle.PM.m4,H2c.hurdle.PM.m4a,H2c.hurdle.PM.m4b,H2c.hurdle.PM.m4c,H2c.hurdle.PM.m4d,H2c.hurdle.PM.m4e)
+
+form5 <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + MassGainRate + (1|Year) 
+form5a <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + Age + (1|Year) 
+form5b <- factor(PupMass > 0) ~ TotalHeadFSA + TotalBackFSA + MassGainRate + (1|Year) 
+form5c <- factor(PupMass > 0) ~ TotalHeadFSA + Age + MassGainRate + (1|Year) 
+form5d <- factor(PupMass > 0) ~ TotalBackFSA + Age + MassGainRate + (1|Year) 
+
+H2c.hurdle.PM.m5 = glmer(form5, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m5a = glmer(form5a, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+
+H2c.hurdle.PM.m5b = glmer(form5b, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m5c = glmer(form5c, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+H2c.hurdle.PM.m5d = glmer(form5d, 
+                         family = "binomial", 
+                         control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)), 
+                         #fixef.prior = normal, cov.prior = NULL, #corrects for complete separation
+                         data=H2c.hurdle.PM)
+anova(H2c.hurdle.PM.m5,H2c.hurdle.PM.m5a,H2c.hurdle.PM.m5b,H2c.hurdle.PM.m5c,H2c.hurdle.PM.m5d)
+
+summary(H2c.hurdle.PM.m5)
+### effect size for binomial GLMM https://bmcmedresmethodol.biomedcentral.com/articles/10.1186/s12874-018-0531-9
+#summary(update(H2c.hurdle.PM.m1, method = "brglm_fit")) #corrects complete separation in binom glm
+r2_nakagawa(H2c.hurdle.PM.m5)
+PMNPartR2<-partR2(H2c.hurdle.PM.m5, partvars = c("TotalHeadFSA", "TotalBackFSA","Age", "MassGainRate"), 
+                  R2_type = "marginal", nboot = 10)
+PMNPartR2
+```
+
+```{r checking residuals hurdle part 2 log regress PM}
+1 - pchisq(deviance(H2c.hurdle.PM.m5), df.residual(H2c.hurdle.PM.m5))
+
+plot(residuals(H2c.hurdle.PM.m5, type = "pearson"))
+qqnorm(resid(H2c.hurdle.PM.m5))
+qqline(resid(H2c.hurdle.PM.m5))
+hist(resid(H2c.hurdle.PM.m5))
+
+
+
+```
+### made year a random effect, employed increased iterations and scaled the variables and was able to perform a mixed model analysis which removed a lot of issues with multicollinearity as well.
+
+```{r hurdle part 2 zerotrunc}
+H2c.hurdle.PM$PupMass<-as.numeric(H2c.hurdle.PM$PupMass)
+H2c.hurdle.PM.z<- subset(H2c.hurdle.PM, PupMass > 0)
+form<- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year)
+H2c.PM.trunc = lmer(form, data=H2c.hurdle.PM.z)
+vif(H2c.PM.trunc)
+
+
+form1 <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:MassGainRate + TotalHeadFSA:DepartMass + DepartMass:Age
+form1a <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:MassGainRate + TotalHeadFSA:DepartMass
+form1b <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + TotalHeadFSA:TotalBackFSA + DepartMass:MassGainRate + DepartMass:Age
+form1c <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + TotalHeadFSA:TotalBackFSA + TotalHeadFSA:DepartMass + DepartMass:Age
+form1d <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass + DepartMass:Age
+
+H2c.hurdle.PM.zm1 <- glmmTMB(form1,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm1a <- glmmTMB(form1a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+
+H2c.hurdle.PM.zm1b <- glmmTMB(form1b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+
+H2c.hurdle.PM.zm1c <- glmmTMB(form1c,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm1d <- glmmTMB(form1d,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm1,H2c.hurdle.PM.zm1a,H2c.hurdle.PM.zm1b,H2c.hurdle.PM.zm1c,H2c.hurdle.PM.zm1d)
+
+form2 <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass + DepartMass:Age
+form2a <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:MassGainRate + TotalHeadFSA:DepartMass 
+form2b <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:MassGainRate + DepartMass:Age
+form2c <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + TotalHeadFSA:DepartMass + DepartMass:Age
+
+
+H2c.hurdle.PM.zm2 <- glmmTMB(form2,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm2a <- glmmTMB(form2a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm2b <- glmmTMB(form2b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm2c <- glmmTMB(form2c,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm2,H2c.hurdle.PM.zm2a,H2c.hurdle.PM.zm2b,H2c.hurdle.PM.zm2c)
+
+form3 <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:MassGainRate + DepartMass:Age
+form3a <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:MassGainRate 
+form3b <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) + DepartMass:Age
+form3c <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) 
+
+H2c.hurdle.PM.zm3 <- glmmTMB(form3,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm3a <- glmmTMB(form3a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm3b <- glmmTMB(form3b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm3c <- glmmTMB(form3c,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm3,H2c.hurdle.PM.zm3a,H2c.hurdle.PM.zm3b,H2c.hurdle.PM.zm3c)
+
+form4 <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) 
+form4a <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year)
+form4b <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + DepartMass + PupAge + (1|Year)
+form4c <- PupMass ~ TotalHeadFSA + TotalBackFSA + Age + MassGainRate + PupAge + (1|Year)
+form4d <- PupMass ~ TotalHeadFSA + TotalBackFSA + DepartMass + MassGainRate + PupAge + (1|Year)
+form4e <- PupMass ~ TotalHeadFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year)
+form4f <- PupMass ~ TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year) 
+
+H2c.hurdle.PM.zm4 <- glmmTMB(form4,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm4a <- glmmTMB(form4a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm4b <- glmmTMB(form4b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm4c <- glmmTMB(form4c,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm4d <- glmmTMB(form4d,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm4e <- glmmTMB(form4e,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm4f <- glmmTMB(form4f,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm4,H2c.hurdle.PM.zm4a,H2c.hurdle.PM.zm4b,H2c.hurdle.PM.zm4c,H2c.hurdle.PM.zm4d,H2c.hurdle.PM.zm4e,H2c.hurdle.PM.zm4f)
+
+form5 <- PupMass ~ TotalBackFSA + Age + DepartMass + MassGainRate + PupAge + (1|Year)
+form5a <- PupMass ~ TotalBackFSA + Age + DepartMass + MassGainRate + (1|Year)
+form5b <- PupMass ~ TotalBackFSA + Age + DepartMass + PupAge + (1|Year)
+form5c <- PupMass ~ TotalBackFSA + Age + MassGainRate + PupAge + (1|Year)
+form5d <- PupMass ~ TotalBackFSA + DepartMass + MassGainRate + PupAge + (1|Year)
+form5e <- PupMass ~ Age + DepartMass + MassGainRate + PupAge + (1|Year)
+
+H2c.hurdle.PM.zm5 <- glmmTMB(form5,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm5a <- glmmTMB(form5a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm5b <- glmmTMB(form5b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm5c <- glmmTMB(form5c,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm5d <- glmmTMB(form5d,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm5e <- glmmTMB(form5e,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm5,H2c.hurdle.PM.zm5a,H2c.hurdle.PM.zm5b,H2c.hurdle.PM.zm5c,H2c.hurdle.PM.zm5d,H2c.hurdle.PM.zm5e)
+
+form6 <- PupMass ~ TotalBackFSA + DepartMass + MassGainRate + PupAge + (1|Year)
+form6a <- PupMass ~ TotalBackFSA + DepartMass + MassGainRate + (1|Year)
+form6b <- PupMass ~ TotalBackFSA + DepartMass + PupAge + (1|Year)
+form6c <- PupMass ~ TotalBackFSA + MassGainRate + PupAge + (1|Year)
+form6d <- PupMass ~ DepartMass + MassGainRate + PupAge + (1|Year)
+
+H2c.hurdle.PM.zm6 <- glmmTMB(form6,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm6a <- glmmTMB(form6a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm6b <- glmmTMB(form6b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm6c <- glmmTMB(form6c,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm6d <- glmmTMB(form6d,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm6,H2c.hurdle.PM.zm6a,H2c.hurdle.PM.zm6b,H2c.hurdle.PM.zm6c,H2c.hurdle.PM.zm6d)
+
+form7 <- PupMass ~ TotalBackFSA + MassGainRate + (1|Year)
+form7a <- PupMass ~ TotalBackFSA + PupAge + (1|Year)
+form7b <- PupMass ~ MassGainRate + PupAge + (1|Year)
+
+H2c.hurdle.PM.zm7 <- glmmTMB(form7,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+summary(H2c.hurdle.PM.zm7)
+H2c.hurdle.PM.zm7a <- glmmTMB(form7a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm7b <- glmmTMB(form7b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm7,H2c.hurdle.PM.zm7a,H2c.hurdle.PM.zm7b)
+
+form8 <- PupMass ~ MassGainRate + PupAge + (1|Year)
+form8a <- PupMass ~ MassGainRate + (1|Year)
+form8b <- PupMass ~ PupAge + (1|Year)
+
+H2c.hurdle.PM.zm8 <- glmmTMB(form8,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm8a <- glmmTMB(form8a,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+H2c.hurdle.PM.zm8b <- glmmTMB(form8b,  
+                             family="truncated_poisson", data=H2c.hurdle.PM.z)
+anova(H2c.hurdle.PM.zm8,H2c.hurdle.PM.zm8a,H2c.hurdle.PM.zm8b)
+
+summary(H2c.hurdle.PM.zm8)
+r2_nakagawa(H2c.hurdle.PM.zm8,tolerance = 1e-15)
+#https://stats.stackexchange.com/questions/285414/zero-truncated-poisson-distribution-in-glmmtmb
+
+library(performance)
+r2_zeroinflated(H2c.hurdle.PM.zm8)
+r2 = r2(H2c.hurdle.PM.zm8)
+r2
+```
+
+####I don't feel there is multicollinearity based off the vif from the glm, but there is not a big enough sample size for the zero truncated model to adequately test interactions. I tried to test them one by one and couldn't find any significant interactions but including all of the lower order interactions results in an error due to convergence in the model. the model without interactions doesn't have a large enough sample size to test the impact of the frontal surface area of the head tags. and there is only a signifcant effect of mass gain rate and pup age on the pup mass. 
+
+#### I went back to the glm which is less ideal since it doesn't have the same assumptions related to the probabilities of zeros, but I wanted to see if there was a measurable effect on just pup mass alone without considering if birth likelihood was impacted. I found no significant interactions during the model selection process and proceeded with model with no interactions. There was no significant effect from the tags but there was from rate of mass gain and then possibly (almost certainly) pup age.
+
+```{r checking residuals hurdle part 2 zero trunc PM}
+1 - pchisq(deviance(H2c.hurdle.PM.zm1), df.residual(H2c.hurdle.PM.zm1))
+
+residuals(H2c.hurdle.PM.zm1, type = "pearson")
+predict(H2c.hurdle.PM.zm1, type = "response")
+plot(H2c.hurdle.PM.zm1, which=1, col=c("blue")) 
+
+
+```
+
+
